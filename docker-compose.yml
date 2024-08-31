@@ -1,0 +1,86 @@
+version: "3"
+
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - 27017:27017
+    networks:
+      - dbnet
+
+  backend:
+    init: true
+    depends_on:
+      - mongo
+    environment:
+      - ENV="TEST"
+      - DB_URI="mongodb://mongo:27017"
+      - DB_NAME="test-db"
+      - PORT="3000"
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./backend/src:/app/src:cached
+      - ./backend/test:/app/test:cached
+      - ./backend/coverage:/app/coverage
+      - ./common:/app/common:cached
+    networks:
+      - dbnet
+      - web
+    command: ["npm", "run", "dev"]
+    ports:
+      - 9229:9229
+      - 3000:3000
+
+  backend-test:
+    depends_on:
+      - mongo
+    environment:
+      - ENV="TEST"
+      - DB_URI="mongodb://mongo:27017"
+      - DB_NAME="test-db"
+      - PORT="3000"
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./backend/src:/app/src:cached
+      - ./backend/test:/app/test:cached
+      - ./backend/coverage:/app/coverage
+      - ./common:/app/common:cached
+    networks:
+      - dbnet
+      - web
+    command: ["npm", "run", "test:watch"]
+    ports:
+      - 9229:9229
+
+  backend-test-ci:
+    depends_on:
+      - mongo
+    environment:
+      - ENV="TEST"
+      - DB_URI="mongodb://mongo:27017"
+      - DB_NAME="test-db"
+      - PORT="3000"
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./backend/src:/app/src:cached
+      - ./backend/test:/app/test:cached
+      - ./backend/coverage:/app/coverage
+      - ./common:/app/common:cached
+    networks:
+      - dbnet
+      - web
+    command: ["npm", "run", "test"]
+    ports:
+      - 9229:9229
+
+networks:
+  dbnet:
+    driver: bridge
+  web:
+    driver: bridge

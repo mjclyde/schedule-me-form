@@ -1,10 +1,10 @@
-import { Test } from "../src/index"
+import { Thing } from "../src/index"
 import { assert } from 'chai';
 
 describe('Test', () => {
 
   it('Should do a thing', () => {
-    const foo = new Test();
+    const foo = new Thing();
     assert.isOk(foo);
   })
 
