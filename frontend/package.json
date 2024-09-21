@@ -12,8 +12,12 @@
     "@headlessui/vue": "^1.7.22",
     "@heroicons/vue": "^2.1.5",
     "@tailwindcss/forms": "^0.5.8",
+    "@vueuse/core": "^11.0.3",
+    "@vueuse/router": "^11.0.3",
+    "maska": "^3.0.2",
     "pinia": "^2.2.2",
-    "vue": "^3.4.37"
+    "vue": "^3.4.37",
+    "vue-router": "^4.4.3"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.2",

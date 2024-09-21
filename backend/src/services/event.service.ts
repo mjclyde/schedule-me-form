@@ -7,13 +7,17 @@ export class EventService extends BaseService<EventModal> {
   protected collectionName = 'events';
 
   find() {
-    return this.collection.find({}).toArray().then(docs => docs.map(d => new Event(d)));
+    return this.collection.find(this.filterOutDeleted({})).toArray().then(docs => docs.map(d => new Event(d)));
   }
 
-  create() {
-    const doc: EventModal = new Event({
+  findById(id: string) {
+    return this.collection.findOne(this.filterOutDeleted({_id: id})).then(doc => doc ? new Event(doc) : null);
+  }
+
+  create(event: {type: string, name: string, description: string}) {
+    const doc = new Event({
       _id: new ObjectId().toHexString(),
-      timestamp: new Date(),
+      ...event,
     });
     this.addCreatedBy(doc);
     return this.collection.insertOne(doc).then(() => doc);

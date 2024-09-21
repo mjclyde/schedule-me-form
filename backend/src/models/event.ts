@@ -2,11 +2,15 @@ import { hy } from "hydratable";
 import { BaseDoc, BaseModel } from "./baseDoc";
 
 export interface EventModal extends BaseModel {
-  timestamp: Date;
+  type: string;
+  name: string;
+  description: string;
 }
 
 export class Event extends BaseDoc<EventModal> implements EventModal {
 
-  @hy('date') timestamp: Date;
+  @hy('string') type: string;
+  @hy('string') name: string;
+  @hy('string') description: string;
 
 }

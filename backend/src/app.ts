@@ -1,17 +1,28 @@
 import { APIConstructor, GenerateAPIs, InjectableConstructor, Injector } from '@ncss/api-decorator';
 import express, { Application, Response } from 'express';
+import cors from 'cors';
 import { Server } from 'http';
 import { Environment } from './environment';
 import { BadRequestError, DocumentNotFoundError, DuplicateIdError } from './errors';
 import { EventService } from './services/event.service';
 import { EventAPI } from './api/events.api';
+import { SlotService } from './services/slot.service';
+import { SlotAPI } from './api/slots.api';
+import { PersonService } from './services/person.service';
+import { NotificationService } from './services/notification.service';
+import { ProcessReminders } from './reminders';
+import { CronJob } from 'cron';
 
 const SERVICES: InjectableConstructor[] = [
   EventService,
+  SlotService,
+  PersonService,
+  NotificationService,
 ];
 
 const APIS: APIConstructor[] = [
   EventAPI,
+  SlotAPI
 ];
 
 export class App {
@@ -19,14 +30,22 @@ export class App {
   private injector: Injector;
   private server?: Server;
   private port: number;
+  private remindersCronJob: CronJob;
 
   constructor(port = Environment.PORT) {
     this.port = port;
     this.app = express();
     this.injector = new Injector();
+    this.remindersCronJob = CronJob.from({
+      cronTime: '0 12-18 * * *',
+      onTick: () => ProcessReminders(this.injector, '2024tdfa'),
+      start: false,
+      timeZone: 'America/Denver',
+    })
   }
 
   async init() {
+    this.app.use(cors());
     this.app.use(express.json({ limit: '2mb' }));
     this.app.get('/', (req, res) => res.sendStatus(200));
 
@@ -35,6 +54,7 @@ export class App {
   }
 
   start(): Promise<void> {
+    this.remindersCronJob.start();
     return new Promise<void>(resolve => {
       this.server = this.app.listen(this.port, () => {
         if (this.server) {
@@ -48,6 +68,7 @@ export class App {
   }
 
   stop(): Promise<{ err?: Error }> {
+    this.remindersCronJob.stop();
     return new Promise((resolve, reject) => {
       if (this.server) {
         this.server.close(err => {

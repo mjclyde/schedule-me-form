@@ -74,7 +74,7 @@ class Client {
       console.log('FAILED TO CONNECT TO ', this.uri);
       console.error(e);
     }
-    console.log(`Connected to ${this.uri}`);
+    console.log(`Connected to ${this.uri.replace(/:(.*)@/, '***')}`);
     this.connected = true;
   }
 

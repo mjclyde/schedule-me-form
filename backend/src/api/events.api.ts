@@ -12,13 +12,21 @@ export class EventAPI {
 
   @API('get', '/Events')
   async find(req: Request, res: Response) {
-    const docs = await this.events.find();
-    res.send(docs);
+    res.send(await this.events.find());
+  }
+
+  @API('get', '/Events/:id')
+  async findById(req: Request, res: Response) {
+    res.send(await this.events.findById(req.params.id as string));
   }
 
   @API('post', '/Events')
   async create(req: Request, res: Response) {
-    const doc = await this.events.create();
+    const doc = await this.events.create({
+      name: req.body.name,
+      type: req.body.type,
+      description: req.body.description,
+    });
     res.send(doc);
   }
 

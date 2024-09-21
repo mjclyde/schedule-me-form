@@ -1,4 +1,7 @@
+
 export interface Event {
-  startsAt: Date;
-  endsAt: Date;
+  _id: string;
+  type: string;
+  name: string;
+  description: string;
 }
