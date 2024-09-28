@@ -45,6 +45,7 @@ export class SlotAPI {
       person = await this.persons.create({ name: req.body.name, phone });
     } else {
       await this.persons.updateName(person._id, req.body.name);
+      person.name = req.body.name;
     }
     if (!person) {
       return res.send(500);

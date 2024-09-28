@@ -11,6 +11,9 @@ export default {
       fontFamily: {
         sans: ['Inter var', ...defaultTheme.fontFamily.sans],
       },
+      gap: {
+        '0.1': '0.05rem',
+      }
     },
   },
   plugins: [

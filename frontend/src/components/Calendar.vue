@@ -9,7 +9,7 @@
         class="-m-1.5 flex flex-none items-center justify-center p-1.5 text-gray-400 hover:text-gray-500"
       >
         <span class="sr-only">Previous month</span>
-        <ChevronLeftIcon class="h-7 w-7" aria-hidden="true" />
+        <ChevronLeftIcon class="h-8 w-8" aria-hidden="true" />
       </button>
       <div class="flex-auto text-sm font-bold text-gray-500">{{ MonthNames[store.selectedMonth] }}</div>
       <button
@@ -18,7 +18,7 @@
         class="-m-1.5 flex flex-none items-center justify-center p-1.5 text-gray-400 hover:text-gray-500"
       >
         <span class="sr-only">Next month</span>
-        <ChevronRightIcon class="h-7 w-7" aria-hidden="true" />
+        <ChevronRightIcon class="h-8 w-8" aria-hidden="true" />
       </button>
     </div>
     <div class="mt-6 grid grid-cols-7 text-xs leading-6 text-gray-500">

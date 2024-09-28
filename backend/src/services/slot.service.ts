@@ -140,9 +140,9 @@ export class SlotService extends BaseService<SlotModal> {
 
   create(slot: CreateSlot) {
     const doc = new Slot({
-      _id: new ObjectId().toHexString(),
       persons: [],
       ...slot,
+      _id: new ObjectId().toHexString(),
     });
     this.addCreatedBy(doc);
     return this.collection.insertOne(doc).then(() => doc);

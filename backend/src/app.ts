@@ -54,7 +54,11 @@ export class App {
   }
 
   start(): Promise<void> {
-    this.remindersCronJob.start();
+    if (Environment.ENV === 'PROD') {
+      this.remindersCronJob.start();
+    } else {
+      console.log(`Not going to send reminders (env: ${Environment.ENV})`)
+    }
     return new Promise<void>(resolve => {
       this.server = this.app.listen(this.port, () => {
         if (this.server) {
@@ -68,7 +72,11 @@ export class App {
   }
 
   stop(): Promise<{ err?: Error }> {
-    this.remindersCronJob.stop();
+    if (Environment.ENV === 'PROD') {
+      this.remindersCronJob.stop();
+    } else {
+      console.log(`Not going to send reminders (env: ${Environment.ENV})`)
+    }
     return new Promise((resolve, reject) => {
       if (this.server) {
         this.server.close(err => {
