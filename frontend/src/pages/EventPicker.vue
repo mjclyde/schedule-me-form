@@ -1,5 +1,5 @@
 <template>
-  <div v-if="requestStatus === 'SUCCESS'" class="max-w-xl mx-auto px-8">
+  <div v-if="requestStatus === 'SUCCESS'" class="max-w-xl mx-auto px-8 my-8">
     <Alert v-if="slotStore.selectedSlot && slotStore.selectedCalendarDay" type="SUCCESS" title="You are signed up!">
       You have signed up for {{ eventStore.event?.type }} on {{ MonthNames[slotStore.selectedCalendarDay.month] }}
       {{ slotStore.selectedCalendarDay.date }}, {{ slotStore.selectedCalendarDay.year }} at
@@ -73,6 +73,7 @@ function signUp() {
       requestStatus.value = 'ERROR';
       slotStore.clearSelection();
     }
+    slotStore.fetchSlots();
   })
 
 }

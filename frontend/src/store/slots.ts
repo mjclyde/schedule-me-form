@@ -1,14 +1,15 @@
-import { defineStore } from 'pinia';
-import { Slot } from '../../common/slot';
-import { computed, ref, watch } from 'vue';
-import { useAPI } from './fetch';
-import { useEvent } from './event';
+import { defineStore } from "pinia";
+import { Slot } from "../../common/slot";
+import { computed, Ref, ref, watch } from "vue";
+import { useAPI } from "./fetch";
+import { useEvent } from "./event";
+import { useSession } from "./session";
 
 export interface CalendarDay {
   dateStr: string; // YYYY-MM-DD
-  year: number,
-  month: number,
-  date: number,
+  year: number;
+  month: number;
+  date: number;
   isCurrentMonth: boolean;
   isToday: boolean;
   slots: FormattedSlot[];
@@ -16,11 +17,17 @@ export interface CalendarDay {
 
 export interface FormattedSlot extends Slot {
   timeStr: string;
+  year: number;
+  month: number;
+  date: number;
 }
 
-export const useSlots = defineStore('slots', () => {
+export const useSlots = defineStore("slots", () => {
+  const session = useSession();
+  const eventStore = useEvent();
 
   const allSlots = ref<FormattedSlot[]>([]);
+
   const groupedSlots = computed(() => {
     const group: { [dateStr: string]: FormattedSlot[] } = {};
     for (const s of allSlots.value) {
@@ -35,43 +42,93 @@ export const useSlots = defineStore('slots', () => {
   const selectedYear = ref(new Date().getFullYear());
   const selectedCalendarDay = ref<CalendarDay | null>(null);
   const selectedSlot = ref<FormattedSlot | null>(null);
-  const calendarDays = computed(() => createCalendarDays(groupedSlots.value, {
-    month: selectedMonth.value,
-    year: selectedYear.value,
-  }));
+  const calendarDays = computed(() =>
+    createCalendarDays(groupedSlots.value, {
+      month: selectedMonth.value,
+      year: selectedYear.value,
+    })
+  );
 
-  const eventStore = useEvent();
-
-  watch(() => eventStore.event?._id, () => fetchSlots())
-
-  watch(() => selectedCalendarDay.value, day => {
-    if (!day?.slots?.length) {
-      selectedSlot.value = null;
-    } else {
-      selectedSlot.value = day.slots[0];
-    }
+  const { data: mySlotsRes, execute: fetchMySlots } = useAPI("/MySlots", {
+    immediate: false,
+    beforeFetch: session.beforeFetch,
   })
+    .get()
+    .json();
+
+  const mySlots = computed(() =>
+    !mySlotsRes.value
+      ? []
+      : (mySlotsRes.value as Slot[]).map((s) => {
+          const startAt = new Date(s.startAt);
+          return {
+            ...s,
+            startAt,
+            year: startAt.getFullYear(),
+            month: startAt.getMonth(),
+            date: startAt.getDate(),
+            timeStr: formatTime(startAt),
+          };
+        })
+  ) as Ref<FormattedSlot[]>;
+
+  watch(
+    () => session.person,
+    (p) => (p ? fetchMySlots() : null)
+  );
+
+  watch(
+    () => eventStore.event,
+    () => fetchSlots()
+  );
+  fetchSlots();
+
+  watch(
+    () => selectedCalendarDay.value,
+    (day) => {
+      if (!day?.slots?.length) {
+        selectedSlot.value = null;
+      } else {
+        selectedSlot.value = day.slots[0];
+      }
+    }
+  );
 
   function fetchSlots() {
-    if (!eventStore.event) { return }
-    const { data } = useAPI('/AvailableSlots?eventId=' + eventStore.event._id).get().json();
-    watch(() => data.value, (slots) => {
-      allSlots.value = slots.map((s: Slot) => {
-        const startAt = new Date(s.startAt);
-        return {
-          ...s,
-          startAt,
-          timeStr: formatTime(startAt),
-        }
-      })
-      if (!doesMonthContainAnySlots(allSlots.value, { year: selectedYear.value, month: selectedMonth.value })) {
-        const minDate = getMinDate(allSlots.value);
-        if (minDate) {
-          selectedYear.value = minDate?.getFullYear();
-          selectedMonth.value = minDate?.getMonth();
+    if (!eventStore.event) {
+      return;
+    }
+    const { data } = useAPI("/AvailableSlots?eventId=" + eventStore.event._id)
+      .get()
+      .json();
+    watch(
+      () => data.value,
+      (slots) => {
+        allSlots.value = slots.map((s: Slot) => {
+          const startAt = new Date(s.startAt);
+          return {
+            ...s,
+            startAt,
+            year: startAt.getFullYear(),
+            month: startAt.getMonth(),
+            date: startAt.getDate(),
+            timeStr: formatTime(startAt),
+          };
+        });
+        if (
+          !doesMonthContainAnySlots(allSlots.value, {
+            year: selectedYear.value,
+            month: selectedMonth.value,
+          })
+        ) {
+          const minDate = getMinDate(allSlots.value);
+          if (minDate) {
+            selectedYear.value = minDate?.getFullYear();
+            selectedMonth.value = minDate?.getMonth();
+          }
         }
       }
-    })
+    );
   }
 
   function clearSelection() {
@@ -80,24 +137,44 @@ export const useSlots = defineStore('slots', () => {
   }
 
   return {
-    fetchSlots,
     allSlots,
+    mySlots,
     calendarDays,
     selectedMonth,
     selectedYear,
     selectedCalendarDay,
     selectedSlot,
     clearSelection,
-  }
-})
+    fetchSlots,
+    fetchMySlots,
+  };
+});
 
 export const MonthNames = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
-function createCalendarDays(slots: { [dateStr: string]: FormattedSlot[] }, forMonth: { month: number, year: number }) {
-  const { firstDayOfCalendar, firstDayOfMonth, lastDayOfCalendar, lastDayOfMonth } = getCalendarBoundaryDates(forMonth);
+function createCalendarDays(
+  slots: { [dateStr: string]: FormattedSlot[] },
+  forMonth: { month: number; year: number }
+) {
+  const {
+    firstDayOfCalendar,
+    firstDayOfMonth,
+    lastDayOfCalendar,
+    lastDayOfMonth,
+  } = getCalendarBoundaryDates(forMonth);
   const days: CalendarDay[] = [];
   const day = new Date(firstDayOfCalendar);
   const todayStr = formatDateStr(new Date());
@@ -117,8 +194,12 @@ function createCalendarDays(slots: { [dateStr: string]: FormattedSlot[] }, forMo
   return days;
 }
 
-function doesMonthContainAnySlots(slots: FormattedSlot[], forMonth: { year: number, month: number }) {
-  const { firstDayOfCalendar, lastDayOfCalendar } = getCalendarBoundaryDates(forMonth);
+function doesMonthContainAnySlots(
+  slots: FormattedSlot[],
+  forMonth: { year: number; month: number }
+) {
+  const { firstDayOfCalendar, lastDayOfCalendar } =
+    getCalendarBoundaryDates(forMonth);
   for (const s of slots) {
     if (s.startAt >= firstDayOfCalendar && s.startAt <= lastDayOfCalendar) {
       return true;
@@ -137,14 +218,23 @@ function getMinDate(slots: FormattedSlot[]) {
   return minDate;
 }
 
-function getCalendarBoundaryDates(forMonth: { year: number, month: number }) {
+function getCalendarBoundaryDates(forMonth: { year: number; month: number }) {
   const firstDayOfMonth = new Date(forMonth.year, forMonth.month, 1);
   const firstDayOfCalendar = new Date(firstDayOfMonth);
-  firstDayOfCalendar.setDate(firstDayOfCalendar.getDate() - firstDayOfMonth.getDay());
+  firstDayOfCalendar.setDate(
+    firstDayOfCalendar.getDate() - firstDayOfMonth.getDay()
+  );
   const lastDayOfMonth = new Date(forMonth.year, forMonth.month + 1, 0);
   const lastDayOfCalendar = new Date(lastDayOfMonth);
-  lastDayOfCalendar.setDate(lastDayOfCalendar.getDate() + (6 - lastDayOfMonth.getDay()));
-  return { firstDayOfCalendar, firstDayOfMonth, lastDayOfCalendar, lastDayOfMonth };
+  lastDayOfCalendar.setDate(
+    lastDayOfCalendar.getDate() + (6 - lastDayOfMonth.getDay())
+  );
+  return {
+    firstDayOfCalendar,
+    firstDayOfMonth,
+    lastDayOfCalendar,
+    lastDayOfMonth,
+  };
 }
 
 function formatDateStr(day: Date) {
@@ -152,6 +242,8 @@ function formatDateStr(day: Date) {
 }
 
 function formatTime(date?: Date) {
-  if (!date) { return '' }
-  return date.toLocaleTimeString().replace(/\:\d{2}\s/, ' ');
+  if (!date) {
+    return "";
+  }
+  return date.toLocaleTimeString().replace(/\:\d{2}\s/, " ");
 }

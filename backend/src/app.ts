@@ -12,6 +12,8 @@ import { PersonService } from './services/person.service';
 import { NotificationService } from './services/notification.service';
 import { ProcessReminders } from './reminders';
 import { CronJob } from 'cron';
+import { PersonsAPI } from './api/persons.api';
+import { SetOTPAuthInjector } from './middleware/otpAuthorization';
 
 const SERVICES: InjectableConstructor[] = [
   EventService,
@@ -22,7 +24,8 @@ const SERVICES: InjectableConstructor[] = [
 
 const APIS: APIConstructor[] = [
   EventAPI,
-  SlotAPI
+  SlotAPI,
+  PersonsAPI,
 ];
 
 export class App {
@@ -45,6 +48,7 @@ export class App {
   }
 
   async init() {
+    SetOTPAuthInjector(this.injector);
     this.app.use(cors());
     this.app.use(express.json({ limit: '2mb' }));
     this.app.get('/', (req, res) => res.sendStatus(200));

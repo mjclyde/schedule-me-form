@@ -2,7 +2,7 @@
   <Listbox as="div" v-model="store.selectedSlot">
     <ListboxLabel class="block text-center mt-8 mb-4 text-gray-500 font-bold text-sm">Select a Time</ListboxLabel>
     <div class="relative mt-2">
-      <ListboxButton :disabled="!store.selectedSlot" class="relative w-full cursor-default rounded-md bg-white py-3 pl-5 pr-10 text-left text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:outline-none focus:ring-2 focus:ring-sky-600 sm:leading-6"
+      <ListboxButton :disabled="!store.selectedSlot" class="relative w-full cursor-default rounded-md bg-white py-3 pl-5 pr-10 text-left text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:outline-none focus:ring-2 focus:ring-sky-500 sm:leading-6"
         :class="[!store.selectedSlot ? 'opacity-40' : '']"
       >
         <span class="truncate">{{ store.selectedSlot ? store.selectedSlot.timeStr : 'Select a Time' }}</span>

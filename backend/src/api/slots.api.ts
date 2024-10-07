@@ -1,13 +1,15 @@
 import { API, Injector } from "@ncss/api-decorator";
 import { Request, Response } from "express";
 import { CreateSlot, SlotService } from "../services/slot.service";
-import { SignUpRequest } from '../../common/slot';
+import { SignUpRequest } from "../../common/slot";
 import { PersonService } from "../services/person.service";
 import { NotificationService } from "../services/notification.service";
 import { EventService } from "../services/event.service";
+import { FormatTime } from "../utils/formatTime";
+import { FormatPhoneNumber } from "../utils/formatPhoneNumber";
+import { AuthorizedRequest, UseOTPAuth } from "../middleware/otpAuthorization";
 
 export class SlotAPI {
-
   private slots: SlotService;
   private persons: PersonService;
   private notifications: NotificationService;
@@ -20,26 +22,33 @@ export class SlotAPI {
     this.events = injector.find(EventService);
   }
 
-  @API('get', '/Slots')
+  @API("get", "/Slots")
   async find(req: Request, res: Response) {
-    if (typeof req.query.eventId !== 'string') {
+    if (typeof req.query.eventId !== "string") {
       return res.send([]);
     }
     res.send(await this.slots.find(req.query.eventId));
   }
 
-  @API('get', '/AvailableSlots')
+  @API("get", "/MySlots", UseOTPAuth())
+  async findMySlots(req: AuthorizedRequest, res: Response) {
+    res.send(
+      await this.slots.findSlotsByPerson(req.person._id, req.person.otp.eventId)
+    );
+  }
+
+  @API("get", "/AvailableSlots")
   async findAvailable(req: Request, res: Response) {
-    if (typeof req.query.eventId !== 'string') {
+    if (typeof req.query.eventId !== "string") {
       return res.send([]);
     }
     res.send(await this.slots.findAvailable(req.query.eventId));
   }
 
-  @API('put', '/Slots/:id/SignUp')
+  @API("put", "/Slots/:id/SignUp")
   async signUp(req: Request<{}, {}, SignUpRequest>, res: Response) {
-    req.body = { ...req.body, slotId: req.params['id'] };
-    const phone = this.formatPhoneNumber(req.body.phone);
+    req.body = { ...req.body, slotId: req.params["id"] };
+    const phone = FormatPhoneNumber(req.body.phone);
     let person = await this.persons.findByPhone(phone);
     if (!person) {
       person = await this.persons.create({ name: req.body.name, phone });
@@ -50,7 +59,10 @@ export class SlotAPI {
     if (!person) {
       return res.send(500);
     }
-    const signUpResult = await this.slots.signUp({ slotId: req.body.slotId, personId: person._id });
+    const signUpResult = await this.slots.signUp({
+      slotId: req.body.slotId,
+      personId: person._id,
+    });
     const slot = await this.slots.findById(req.body.slotId);
     if (signUpResult.success && slot?.startAt) {
       const event = await this.events.findById(slot.eventId);
@@ -64,13 +76,22 @@ export class SlotAPI {
             slotStartAt: slot.startAt,
             eventTitle: event.type,
           }),
-        })
+        });
       }
     }
     res.send(signUpResult);
   }
 
-  @API('post', '/Slots')
+  @API("delete", "/Slots/:slotId/Persons/:personId", UseOTPAuth())
+  async removePersonFromSlot(req: AuthorizedRequest, res: Response) {
+    await this.slots.removePerson({
+      slotId: req.params.slotId,
+      personId: req.params.personId,
+    });
+    res.sendStatus(204);
+  }
+
+  @API("post", "/Slots")
   async create(req: Request<{}, {}, CreateSlot>, res: Response) {
     const createDoc: CreateSlot = {
       eventId: req.body.eventId,
@@ -92,21 +113,17 @@ export class SlotAPI {
     res.send(doc);
   }
 
-  private createNotificationMessage(info: { personName: string, slotStartAt: Date, eventTitle: string }) {
-    const formattedDate = info.slotStartAt.toLocaleDateString('en-US', { timeZone: 'America/Denver' });
-    return `Hello ${info.personName}! You are scheduled for ${info.eventTitle} on ${formattedDate} at ` +
-      `${this.formatTime(info.slotStartAt)}. We look forward to seeing you there.`;
-  }
-
-  private formatPhoneNumber(phone: string) {
-    phone = phone.replace(/\(/, '').replace(/\)/, '').replace(/\s/, '').replace(/-/, '');
-    if (phone.length === 10) {
-      phone = '+1' + phone;
-    }
-    return phone;
-  }
-  private formatTime(date?: Date) {
-    if (!date) { return '' }
-    return date.toLocaleTimeString('en-US', { timeZone: 'America/Denver' }).replace(/\:\d{2}\s/, ' ');
+  private createNotificationMessage(info: {
+    personName: string;
+    slotStartAt: Date;
+    eventTitle: string;
+  }) {
+    const formattedDate = info.slotStartAt.toLocaleDateString("en-US", {
+      timeZone: "America/Denver",
+    });
+    return (
+      `Hello ${info.personName}! You are scheduled for ${info.eventTitle} on ${formattedDate} at ` +
+      `${FormatTime(info.slotStartAt)}. We look forward to seeing you there.`
+    );
   }
 }
