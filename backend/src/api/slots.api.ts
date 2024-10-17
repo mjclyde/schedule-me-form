@@ -1,10 +1,12 @@
 import { API, Injector } from "@ncss/api-decorator";
 import { Request, Response } from "express";
 import { CreateSlot, SlotService } from "../services/slot.service";
-import { SignUpRequest } from '../../common/slot';
+import { SignUpRequest, Slot } from '../../common/slot';
 import { PersonService } from "../services/person.service";
 import { NotificationService } from "../services/notification.service";
 import { EventService } from "../services/event.service";
+import { Person } from "../models/person";
+import { Event } from "../models/event";
 
 export class SlotAPI {
 
@@ -65,6 +67,7 @@ export class SlotAPI {
             eventTitle: event.type,
           }),
         })
+        this.notifyEventOwners({ event, slot, personSignedUp: person});
       }
     }
     res.send(signUpResult);
@@ -98,6 +101,12 @@ export class SlotAPI {
       `${this.formatTime(info.slotStartAt)}. We look forward to seeing you there.`;
   }
 
+  private createOwnerNotificationMessage(info: { personSignedUpName: string, slotStartAt: Date, eventTitle: string }) {
+    const formattedDate = info.slotStartAt.toLocaleDateString('en-US', { timeZone: 'America/Denver' });
+    return `${info.personSignedUpName} has signed up for ${info.eventTitle} on ${formattedDate} at ` +
+      `${this.formatTime(info.slotStartAt)}.`;
+  }
+
   private formatPhoneNumber(phone: string) {
     phone = phone.replace(/\(/, '').replace(/\)/, '').replace(/\s/, '').replace(/-/, '');
     if (phone.length === 10) {
@@ -108,5 +117,23 @@ export class SlotAPI {
   private formatTime(date?: Date) {
     if (!date) { return '' }
     return date.toLocaleTimeString('en-US', { timeZone: 'America/Denver' }).replace(/\:\d{2}\s/, ' ');
+  }
+
+  private notifyEventOwners(info: { event: Event, slot: Slot, personSignedUp: Person }) {
+    if (!info.event.owners?.length) {
+      return;
+    }
+    for (const o of info.event.owners) {
+      this.notifications.send({
+        personId: o.id,
+        phone: o.phone,
+        name: o.name,
+        message: this.createOwnerNotificationMessage({
+          personSignedUpName: info.personSignedUp.name,
+          slotStartAt: info.slot.startAt,
+          eventTitle: info.event.type,
+        }),
+      })
+    }
   }
 }
