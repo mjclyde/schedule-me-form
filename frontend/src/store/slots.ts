@@ -49,6 +49,17 @@ export const useSlots = defineStore("slots", () => {
     })
   );
 
+  watch(() => calendarDays.value, (days) => {
+    if (selectedCalendarDay.value?.dateStr) {
+      for (const d of days) {
+        if (selectedCalendarDay.value.dateStr === d.dateStr) {
+          selectedCalendarDay.value = d;
+          break;
+        }
+      }
+    }
+  })
+
   const { data: mySlotsRes, execute: fetchMySlots } = useAPI("/MySlots", {
     immediate: false,
     beforeFetch: session.beforeFetch,
@@ -136,6 +147,26 @@ export const useSlots = defineStore("slots", () => {
     selectedSlot.value = null;
   }
 
+  function deletePersonFromSlot(slotId: string, personId: string) {
+    const done = ref<boolean>(false);
+    const errorMsg = ref('');
+    const { data, error } = useAPI(`/Slots/${slotId}/Persons/${personId}`, {
+      beforeFetch: session.beforeFetch,
+    }).delete();
+    watch(
+      () => data.value,
+      () => {
+        fetchSlots();
+        fetchMySlots().then(() => done.value = true);
+      }
+    );
+    watch(
+      () => error.value,
+      (res) => errorMsg.value = res
+    );
+    return { done, error: errorMsg }
+  }
+
   return {
     allSlots,
     mySlots,
@@ -147,6 +178,7 @@ export const useSlots = defineStore("slots", () => {
     clearSelection,
     fetchSlots,
     fetchMySlots,
+    deletePersonFromSlot,
   };
 });
 

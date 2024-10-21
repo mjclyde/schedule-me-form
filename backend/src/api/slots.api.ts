@@ -84,9 +84,25 @@ export class SlotAPI {
 
   @API("delete", "/Slots/:slotId/Persons/:personId", UseOTPAuth())
   async removePersonFromSlot(req: AuthorizedRequest, res: Response) {
+    const person = await this.persons.findById(req.params.personId);
+    const slot = await this.slots.findById(req.params.slotId);
+    if (!person || !slot) {
+      return res.sendStatus(404);
+    }
+    const event = await this.events.findById(slot.eventId);
     await this.slots.removePerson({
       slotId: req.params.slotId,
       personId: req.params.personId,
+    });
+    await this.notifications.send({
+      personId: person._id,
+      name: person.name,
+      phone: person.phone,
+      message: this.createDeletedSlotNotificationMessage({
+        personName: person.name,
+        eventTitle: event?.type || 'an event',
+        slotStartAt: slot.startAt,
+      }),
     });
     res.sendStatus(204);
   }
@@ -124,6 +140,20 @@ export class SlotAPI {
     return (
       `Hello ${info.personName}! You are scheduled for ${info.eventTitle} on ${formattedDate} at ` +
       `${FormatTime(info.slotStartAt)}. We look forward to seeing you there.`
+    );
+  }
+
+  private createDeletedSlotNotificationMessage(info: {
+    personName: string;
+    slotStartAt: Date;
+    eventTitle: string;
+  }) {
+    const formattedDate = info.slotStartAt.toLocaleDateString("en-US", {
+      timeZone: "America/Denver",
+    });
+    return (
+      `Hello ${info.personName}. Your appointment for ${info.eventTitle} on ${formattedDate} at ` +
+      `${FormatTime(info.slotStartAt)} has been deleted.`
     );
   }
 }

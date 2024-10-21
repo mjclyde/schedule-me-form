@@ -8,6 +8,10 @@ export class PersonService extends BaseService<PersonModal> {
   protected collectionName = 'persons';
   private otps = new ShortUniqueId({length: 6});
 
+  findById(id: string) {
+    return this.collection.findOne({_id: id}).then(doc => doc ? new Person(doc) : null)
+  }
+
   findByPhone(phone: string) {
     return this.collection.findOne(this.filterOutDeleted({ phone })).then(doc => doc ? new Person(doc) : null)
   }
