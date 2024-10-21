@@ -8,6 +8,9 @@ import { EventService } from "../services/event.service";
 import { FormatTime } from "../utils/formatTime";
 import { FormatPhoneNumber } from "../utils/formatPhoneNumber";
 import { AuthorizedRequest, UseOTPAuth } from "../middleware/otpAuthorization";
+import { Person } from "../models/person";
+import { Slot } from "../models/slot";
+import { Event } from "../models/event";
 
 export class SlotAPI {
   private slots: SlotService;
@@ -77,6 +80,16 @@ export class SlotAPI {
             eventTitle: event.type,
           }),
         });
+        this.notifyEventOwners({
+          event,
+          slot,
+          personSignedUp: person,
+          message: this.createOwnerNotificationMessage({
+            personSignedUpName: person.name,
+            slotStartAt: slot.startAt,
+            eventTitle: event.type,
+          }),
+        });
       }
     }
     res.send(signUpResult);
@@ -100,10 +113,22 @@ export class SlotAPI {
       phone: person.phone,
       message: this.createDeletedSlotNotificationMessage({
         personName: person.name,
-        eventTitle: event?.type || 'an event',
+        eventTitle: event?.type || "an event",
         slotStartAt: slot.startAt,
       }),
     });
+    if (event) {
+      this.notifyEventOwners({
+        event,
+        slot,
+        personSignedUp: person,
+        message: this.createDeleteSlotOwnerNotificationMessage({
+          personSignedUpName: person.name,
+          slotStartAt: slot.startAt,
+          eventTitle: event.type,
+        }),
+      });
+    }
     res.sendStatus(204);
   }
 
@@ -154,6 +179,54 @@ export class SlotAPI {
     return (
       `Hello ${info.personName}. Your appointment for ${info.eventTitle} on ${formattedDate} at ` +
       `${FormatTime(info.slotStartAt)} has been deleted.`
+    );
+  }
+
+  private notifyEventOwners(info: {
+    event: Event;
+    slot: Slot;
+    personSignedUp: Person;
+    message: string;
+  }) {
+    if (!info.event.owners?.length) {
+      return;
+    }
+    for (const o of info.event.owners) {
+      this.notifications.send({
+        personId: o.id,
+        phone: o.phone,
+        name: o.name,
+        message: info.message,
+      });
+    }
+  }
+
+  private createOwnerNotificationMessage(info: {
+    personSignedUpName: string;
+    slotStartAt: Date;
+    eventTitle: string;
+  }) {
+    const formattedDate = info.slotStartAt.toLocaleDateString("en-US", {
+      timeZone: "America/Denver",
+    });
+    return (
+      `${info.personSignedUpName} has signed up for ${info.eventTitle} on ${formattedDate} at ` +
+      `${FormatTime(info.slotStartAt)}.`
+    );
+  }
+
+
+  private createDeleteSlotOwnerNotificationMessage(info: {
+    personSignedUpName: string;
+    slotStartAt: Date;
+    eventTitle: string;
+  }) {
+    const formattedDate = info.slotStartAt.toLocaleDateString("en-US", {
+      timeZone: "America/Denver",
+    });
+    return (
+      `${info.personSignedUpName} has deleted ${info.eventTitle} on ${formattedDate} at ` +
+      `${FormatTime(info.slotStartAt)}.`
     );
   }
 }
