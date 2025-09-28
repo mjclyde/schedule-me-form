@@ -23,6 +23,7 @@ export async function ProcessReminders(injector: Injector, eventId: string) {
       personId: d.person.id,
       name: d.person.name,
       phone: d.person.phone,
+      optOutSMS: d.person.optOutSMS,
       message,
     })
     await slots.reminderHasBeenSent(d._id, d.person.id);

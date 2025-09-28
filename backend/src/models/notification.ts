@@ -6,7 +6,8 @@ export interface NotificationModal extends BaseModel {
   name: string;
   phone: string;
   message: string;
-  twilioResponse: any;
+  twilioResponse?: any;
+  skippedSendingSMS?: boolean;
 }
 
 export class Notification extends BaseDoc<NotificationModal> implements NotificationModal {
@@ -14,5 +15,6 @@ export class Notification extends BaseDoc<NotificationModal> implements Notifica
   @hy('string') name: string;
   @hy('string') phone: string;
   @hy('string') message: string;
-  @hy('object') twilioResponse: any;
+  @hy('object') twilioResponse?: any;
+  @hy('bool') skippedSendingSMS?: boolean;
 }

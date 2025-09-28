@@ -120,6 +120,7 @@ export class SlotService extends BaseService<SlotModal> {
               id: "$person._id",
               name: "$person.name",
               phone: "$person.phone",
+              optOutSMS: "$person.optOutSMS",
             },
             event: {
               name: "$event.name",
@@ -138,6 +139,7 @@ export class SlotService extends BaseService<SlotModal> {
           id: string;
           name: string;
           phone: string;
+          optOutSMS?: boolean;
         };
         event: {
           name: string;

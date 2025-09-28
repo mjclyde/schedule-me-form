@@ -11,12 +11,17 @@ import { AuthorizedRequest, UseOTPAuth } from "../middleware/otpAuthorization";
 import { Person } from "../models/person";
 import { Slot } from "../models/slot";
 import { Event } from "../models/event";
+import { CreateOTPLink } from "../utils/otpLink";
+import { writeFile, unlink } from "fs";
+import { CreateICS } from "../utils/createICS";
+import ShortUniqueId from "short-unique-id";
 
 export class SlotAPI {
   private slots: SlotService;
   private persons: PersonService;
   private notifications: NotificationService;
   private events: EventService;
+  private ids = new ShortUniqueId({ length: 12 });
 
   constructor(injector: Injector) {
     this.slots = injector.find(SlotService);
@@ -54,9 +59,9 @@ export class SlotAPI {
     const phone = FormatPhoneNumber(req.body.phone);
     let person = await this.persons.findByPhone(phone);
     if (!person) {
-      person = await this.persons.create({ name: req.body.name, phone });
+      person = await this.persons.create({ name: req.body.name, phone, optOutSMS: !req.body.remindMe });
     } else {
-      await this.persons.updateName(person._id, req.body.name);
+      await this.persons.update(person._id, { name: req.body.name, optOutSMS: !req.body.remindMe });
       person.name = req.body.name;
     }
     if (!person) {
@@ -70,14 +75,17 @@ export class SlotAPI {
     if (signUpResult.success && slot?.startAt) {
       const event = await this.events.findById(slot.eventId);
       if (event) {
+        const otp = await this.getOTP(person, event);
         this.notifications.send({
           personId: person._id,
           name: person.name,
           phone: person.phone,
+          optOutSMS: !req.body.remindMe,
           message: this.createNotificationMessage({
             personName: person.name,
             slotStartAt: slot.startAt,
             eventTitle: event.type,
+            otp,
           }),
         });
         this.notifyEventOwners({
@@ -111,6 +119,7 @@ export class SlotAPI {
       personId: person._id,
       name: person.name,
       phone: person.phone,
+      optOutSMS: person.optOutSMS,
       message: this.createDeletedSlotNotificationMessage({
         personName: person.name,
         eventTitle: event?.type || "an event",
@@ -154,17 +163,53 @@ export class SlotAPI {
     res.send(doc);
   }
 
+  @API("get", "/Slots/:id/CalendarEvent")
+  async createCalendarEvent(req: Request, res: Response) {
+    const slot = await this.slots.findById(req.params.id);
+    if (!slot) {
+      return res.sendStatus(404);
+    }
+    const event = await this.events.findById(slot?.eventId);
+    if (!event) {
+      return res.sendStatus(404);
+    }
+    const end = new Date(slot.startAt);
+    end.setMinutes(end.getMinutes() + (slot.durationMins || 0));
+    const id = `${this.ids.rnd() + "-" + event.type.replace(/\s/gi, "-")}`;
+    const filename = `./${id}.ics`;
+    writeFile(
+      filename,
+      CreateICS({
+        id,
+        title: event.type,
+        start: slot.startAt,
+        end,
+      }),
+      () => {
+        res.download(filename, () =>
+          unlink(filename, () => console.log("done"))
+        );
+      }
+    );
+  }
+
   private createNotificationMessage(info: {
     personName: string;
     slotStartAt: Date;
     eventTitle: string;
+    otp?: { value: string };
   }) {
     const formattedDate = info.slotStartAt.toLocaleDateString("en-US", {
       timeZone: "America/Denver",
     });
     return (
       `Hello ${info.personName}! You are scheduled for ${info.eventTitle} on ${formattedDate} at ` +
-      `${FormatTime(info.slotStartAt)}. We look forward to seeing you there.`
+      `${FormatTime(info.slotStartAt)}. We look forward to seeing you there.` +
+      (info.otp?.value
+        ? ` To view or change your appointment, click here: ${CreateOTPLink(
+            info.otp.value
+          )}`
+        : "")
     );
   }
 
@@ -215,7 +260,6 @@ export class SlotAPI {
     );
   }
 
-
   private createDeleteSlotOwnerNotificationMessage(info: {
     personSignedUpName: string;
     slotStartAt: Date;
@@ -228,5 +272,17 @@ export class SlotAPI {
       `${info.personSignedUpName} has deleted ${info.eventTitle} on ${formattedDate} at ` +
       `${FormatTime(info.slotStartAt)}.`
     );
+  }
+
+  private async getOTP(person: Person, event: Event) {
+    if (
+      person.otp?.value &&
+      person.isValidOtp(person.otp.value) &&
+      person.otp.eventId === event._id
+    ) {
+      return person.otp;
+    }
+    const doc = await this.persons.createOTP(person.phone, event._id);
+    return doc?.otp;
   }
 }

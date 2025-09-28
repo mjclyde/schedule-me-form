@@ -15,4 +15,5 @@ export interface SignUpRequest {
   slotId: string;
   name: string;
   phone: string;
+  remindMe?: boolean;
 }

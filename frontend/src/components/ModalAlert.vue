@@ -25,8 +25,8 @@
               </div>
               <div class="sm:flex sm:items-start">
                 <div
-                  class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
-                  <ExclamationTriangleIcon class="h-6 w-6 text-red-600" aria-hidden="true" />
+                  class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full sm:mx-0 sm:h-10 sm:w-10" :class="[color === 'sky' ? 'bg-sky-100' : 'bg-red-100']">
+                  <slot name="icon" aria-hidden="true" />
                 </div>
                 <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
                   <DialogTitle as="h3" class="text-base font-semibold leading-6 text-gray-900">{{ title }}</DialogTitle>
@@ -39,10 +39,10 @@
               </div>
               <div class="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
                 <button :disabled="working" @click="$emit('submit')" v-if="primaryButtonText" type="button"
-                  class="relative inline-flex w-full justify-center rounded-md h-12 items-center bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:ml-3 sm:w-auto">
+                  class="relative inline-flex w-full justify-center rounded-md h-12 items-center px-3 py-2 text-sm font-semibold text-white shadow-sm sm:ml-3 sm:w-auto" :class="[color === 'sky' ? 'bg-sky-600 hover:bg-sky-500' : 'bg-red-600 hover:bg-red-500']">
                   {{ primaryButtonText }}
                   <div v-if="working"
-                    class="absolute animate-spin right-3 w-6 h-6 border-4 border-red-700 border-t-white rounded-full">
+                    class="absolute animate-spin right-3 w-6 h-6 border-4 border-t-white rounded-full" :class="[color === 'sky' ? 'border-sky-700' : 'border-red-700']">
                   </div>
                 </button>
                 <button v-if="secondaryButtonText" type="button"
@@ -61,7 +61,7 @@
 
 <script setup lang="ts">
 import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue'
-import { ExclamationTriangleIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { XMarkIcon } from '@heroicons/vue/24/outline'
 import { Ref } from 'vue';
 
 defineProps<{
@@ -69,6 +69,7 @@ defineProps<{
   primaryButtonText?: string,
   secondaryButtonText?: string,
   working?: boolean,
+  color?: 'red' | 'sky'
 }>()
 defineEmits(['submit'])
 

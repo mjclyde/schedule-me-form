@@ -1,9 +1,9 @@
 import { ObjectId } from "mongodb";
 import { BaseService } from "./base.service";
-import { Person, PersonModal } from "../models/person";
+import { Person, PersonModel } from "../models/person";
 import ShortUniqueId from 'short-unique-id';
 
-export class PersonService extends BaseService<PersonModal> {
+export class PersonService extends BaseService<PersonModel> {
 
   protected collectionName = 'persons';
   private otps = new ShortUniqueId({length: 6});
@@ -20,11 +20,15 @@ export class PersonService extends BaseService<PersonModal> {
     return this.collection.findOne(this.filterOutDeleted({ 'otp.value': id })).then(doc => doc ? new Person(doc) : null);
   }
 
-  updateName(id: string, name: string) {
-    return this.collection.updateOne({ _id: id }, { $set: { name } });
+  update(id: string, fields: { name: string, optOutSMS?: boolean }) {
+    const $set: {name: string, optOutSMS?: boolean} = { name: fields.name };
+    if (fields.optOutSMS !== undefined) {
+      $set.optOutSMS = fields.optOutSMS;
+    }
+    return this.collection.updateOne({ _id: id }, { $set });
   }
 
-  create(person: { name: string, phone: string }) {
+  create(person: { name: string, phone: string, optOutSMS?: boolean }) {
     const doc: Person = new Person({
       _id: new ObjectId().toHexString(),
       ...person,

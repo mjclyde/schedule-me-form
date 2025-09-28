@@ -5,6 +5,7 @@ import { FormatPhoneNumber } from "../utils/formatPhoneNumber";
 import { PersonService } from "../services/person.service";
 import { NotificationService } from "../services/notification.service";
 import { AuthorizedRequest, UseOTPAuth } from "../middleware/otpAuthorization";
+import { CreateOTPLink } from '../utils/otpLink';
 
 export class EventAPI {
 
@@ -57,12 +58,9 @@ export class EventAPI {
       personId: doc._id,
       name: doc.name,
       phone,
-      message: `Hi ${doc.name}, use this link to view your scheduled events: ${this.createOTPLink(doc.otp.value)}`,
+      message: `Hi ${doc.name}, use this link to view your scheduled events: ${CreateOTPLink(doc.otp.value)}`,
     })
     res.sendStatus(204);
   }
 
-  private createOTPLink(otp: string) {
-    return 'http://schedule-me.mjclyde.com/otp/' + otp;
-  }
 }
