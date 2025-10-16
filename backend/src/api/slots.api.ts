@@ -10,11 +10,13 @@ import { FormatPhoneNumber } from "../utils/formatPhoneNumber";
 import { AuthorizedRequest, UseOTPAuth } from "../middleware/otpAuthorization";
 import { Person } from "../models/person";
 import { Slot } from "../models/slot";
-import { Event } from "../models/event";
+import { Event, SyncCalendar } from "../models/event";
 import { CreateOTPLink } from "../utils/otpLink";
 import { writeFile, unlink } from "fs";
 import { CreateICS } from "../utils/createICS";
 import ShortUniqueId from "short-unique-id";
+import { GoogleCalendarManager } from "../google/googleCalendarManager";
+import { DateTime } from "luxon";
 
 export class SlotAPI {
   private slots: SlotService;
@@ -22,12 +24,14 @@ export class SlotAPI {
   private notifications: NotificationService;
   private events: EventService;
   private ids = new ShortUniqueId({ length: 12 });
+  private calendarManager: GoogleCalendarManager;
 
   constructor(injector: Injector) {
     this.slots = injector.find(SlotService);
     this.persons = injector.find(PersonService);
     this.notifications = injector.find(NotificationService);
     this.events = injector.find(EventService);
+    this.calendarManager = GoogleCalendarManager.GetInstance(this.persons);
   }
 
   @API("get", "/Slots")
@@ -41,7 +45,10 @@ export class SlotAPI {
   @API("get", "/MySlots", UseOTPAuth())
   async findMySlots(req: AuthorizedRequest, res: Response) {
     res.send(
-      await this.slots.findSlotsByPerson(req.person._id, req.person.otp.eventId)
+      await this.slots.findSlotsByPerson(
+        req.person._id,
+        req.person.otp.eventId,
+      ),
     );
   }
 
@@ -50,7 +57,75 @@ export class SlotAPI {
     if (typeof req.query.eventId !== "string") {
       return res.send([]);
     }
-    res.send(await this.slots.findAvailable(req.query.eventId));
+    let syncCalendars: SyncCalendar[] = [];
+    const event = await this.events.findById(req.query.eventId);
+    if (event) {
+      syncCalendars = event.getSyncCalendars();
+    }
+    const slots = await this.slots.findAvailable(req.query.eventId);
+    res.send(await this.filterSlots(slots, syncCalendars));
+  }
+
+  private async filterSlots(slots: Slot[], syncCalendars: SyncCalendar[]) {
+    const { start, end } = this.getStartAndEndOfSlots(slots);
+    if (!start || !end) {
+      return slots;
+    }
+
+    const busy: { [date: string]: { start: DateTime; end: DateTime }[] } = {};
+    for (const c of syncCalendars) {
+      const cal = await this.calendarManager.getCalendar(c.personId);
+      const res = await cal.getBusyTime(c.id, {
+        timeMin: start,
+        timeMax: end,
+        defaultTimeZone: c.timeZone,
+      });
+      for (const day in res) {
+        busy[day] ??= [];
+        busy[day] = busy[day].concat(res[day]);
+      }
+    }
+
+    if (!Object.keys(busy).length) {
+      return slots;
+    }
+
+    return slots.filter((s) => {
+      const start = DateTime.fromISO(s.startAt.toISOString());
+      let end = DateTime.fromISO(s.startAt.toISOString());
+      end = end.plus({ minutes: s.durationMins });
+      const datesToCheck = [start.toISODate() as string];
+      if (datesToCheck[0] !== end.toISODate()) {
+        datesToCheck.push(end.toISODate() as string);
+      }
+      for (const dateStr of datesToCheck) {
+        for (const busyTime of busy[dateStr] || []) {
+          if (
+            (busyTime.start <= start && busyTime.end > start) ||
+            (busyTime.start < end && busyTime.end >= end)
+          ) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+  }
+
+  private getStartAndEndOfSlots(slots: Slot[]) {
+    let start: Date | undefined = undefined;
+    let end: Date | undefined = undefined;
+    for (const s of slots) {
+      if (!start || s.startAt < start) {
+        start = s.startAt;
+      }
+      const slotEndAt = new Date(s.startAt);
+      slotEndAt.setMinutes(slotEndAt.getMinutes() + (s.durationMins || 0));
+      if (!end || slotEndAt > end) {
+        end = slotEndAt;
+      }
+    }
+    return { start, end };
   }
 
   @API("put", "/Slots/:id/SignUp")
@@ -59,9 +134,16 @@ export class SlotAPI {
     const phone = FormatPhoneNumber(req.body.phone);
     let person = await this.persons.findByPhone(phone);
     if (!person) {
-      person = await this.persons.create({ name: req.body.name, phone, optOutSMS: !req.body.remindMe });
+      person = await this.persons.create({
+        name: req.body.name,
+        phone,
+        optOutSMS: !req.body.remindMe,
+      });
     } else {
-      await this.persons.update(person._id, { name: req.body.name, optOutSMS: !req.body.remindMe });
+      await this.persons.update(person._id, {
+        name: req.body.name,
+        optOutSMS: !req.body.remindMe,
+      });
       person.name = req.body.name;
     }
     if (!person) {
@@ -187,9 +269,9 @@ export class SlotAPI {
       }),
       () => {
         res.download(filename, () =>
-          unlink(filename, () => console.log("done"))
+          unlink(filename, () => console.log("done")),
         );
-      }
+      },
     );
   }
 
@@ -207,7 +289,7 @@ export class SlotAPI {
       `${FormatTime(info.slotStartAt)}. We look forward to seeing you there.` +
       (info.otp?.value
         ? ` To view or change your appointment, click here: ${CreateOTPLink(
-            info.otp.value
+            info.otp.value,
           )}`
         : "")
     );
