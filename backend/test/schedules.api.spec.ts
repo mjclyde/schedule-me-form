@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import { SchedulesAPI } from "../src/api/schedules.api";
 import { Schedule, ScheduleModel } from "../src/models/schedule";
 import { CalendarEventLike } from "../src/google/availability";
+import { AvailabilityService } from "../src/services/availability.service";
 import { AvailabilityResponse } from "../../common/schedule";
 
 const TZ = "America/Denver";
@@ -19,7 +20,10 @@ function buildApi(schedule: Schedule | null, events: CalendarEventLike[] = []) {
 
   const api = new SchedulesAPI(injector);
   (api as any).schedules = { findById: async () => schedule };
-  (api as any).calendarManager = {
+  // A fresh AvailabilityService per test, so the shared cache does not leak
+  // between them; its calendar manager is stubbed the same way.
+  const availability = new (AvailabilityService as any)({});
+  (availability as any).calendarManager = {
     getCalendar: async () => ({
       listEvents: async (params: { timeMin?: Date; timeMax?: Date }) => {
         listEvents.calls.push(params);
@@ -27,6 +31,7 @@ function buildApi(schedule: Schedule | null, events: CalendarEventLike[] = []) {
       },
     }),
   };
+  (api as any).availability = availability;
   return { api, listEvents };
 }
 

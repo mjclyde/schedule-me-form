@@ -25,6 +25,7 @@ import { PersonsAPI } from "./api/persons.api";
 import { SetOTPAuthInjector } from "./middleware/otpAuthorization";
 import { ScheduleService } from "./services/schedule.service";
 import { SchedulesAPI } from "./api/schedules.api";
+import { BookingsAPI } from "./api/bookings.api";
 
 const SERVICES: InjectableConstructor[] = [
   EventService,
@@ -34,7 +35,13 @@ const SERVICES: InjectableConstructor[] = [
   ScheduleService,
 ];
 
-const APIS: APIConstructor[] = [EventAPI, SlotAPI, PersonsAPI, SchedulesAPI];
+const APIS: APIConstructor[] = [
+  EventAPI,
+  SlotAPI,
+  PersonsAPI,
+  SchedulesAPI,
+  BookingsAPI,
+];
 
 export class App {
   private app: Application;

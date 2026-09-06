@@ -3,21 +3,11 @@ import { Request, Response } from "express";
 import { DateTime } from "luxon";
 import { ScheduleService } from "../services/schedule.service";
 import { PersonService } from "../services/person.service";
-import { GoogleCalendarManager } from "../google/googleCalendarManager";
-import {
-  clampRanges,
-  generateSlots,
-  splitWindowsAndBusy,
-  TimeRange,
-} from "../google/availability";
-import { DEFAULT_MIN_NOTICE_MINS, Schedule } from "../models/schedule";
-import { TtlCache } from "../utils/ttlCache";
+import { AvailabilityService } from "../services/availability.service";
+import { TimeRange } from "../google/availability";
+import { Schedule } from "../models/schedule";
 import { AvailabilityResponse, AvailableSlot } from "../../common/schedule";
 import { BadRequestError } from "../errors";
-import { calendar_v3 } from "googleapis";
-
-/** Long enough to collapse a burst of month-flipping, short enough to stay fresh. */
-const CALENDAR_CACHE_TTL_MS = 30 * 1000;
 
 /**
  * Hard ceiling on a single availability request, independent of the schedule's
@@ -27,14 +17,11 @@ const MAX_RANGE_DAYS = 62;
 
 export class SchedulesAPI {
   private schedules: ScheduleService;
-  private calendarManager: GoogleCalendarManager;
-  private calendarCache = new TtlCache<calendar_v3.Schema$Event[]>(
-    CALENDAR_CACHE_TTL_MS,
-  );
+  private availability: AvailabilityService;
 
   constructor(injector: Injector) {
     this.schedules = injector.find(ScheduleService);
-    this.calendarManager = GoogleCalendarManager.GetInstance(
+    this.availability = AvailabilityService.GetInstance(
       injector.find(PersonService),
     );
   }
@@ -79,22 +66,7 @@ export class SchedulesAPI {
       return res.send(empty);
     }
 
-    const events = await this.listEvents(schedule, range);
-    const { windows, busy } = splitWindowsAndBusy(events, {
-      defaultTimeZone: schedule.timeZone,
-    });
-
-    const slots = generateSlots({
-      windows: clampRanges(windows, range),
-      busy,
-      durationMins: schedule.durationMins,
-      incrementMins: schedule.incrementMins,
-      bufferBeforeMins: schedule.bufferBeforeMins,
-      bufferAfterMins: schedule.bufferAfterMins,
-      minNoticeMins: schedule.minNoticeMins ?? DEFAULT_MIN_NOTICE_MINS,
-      alignTo: schedule.alignTo,
-      now,
-    });
+    const slots = await this.availability.computeSlots(schedule, range, now);
 
     const body: AvailabilityResponse = {
       timeZone: schedule.timeZone,
@@ -102,28 +74,6 @@ export class SchedulesAPI {
       slots: slots.map(toAvailableSlot),
     };
     res.send(body);
-  }
-
-  private async listEvents(schedule: Schedule, range: TimeRange) {
-    const key = [
-      schedule.ownerPersonId,
-      schedule.calendarId,
-      range.start.toISO(),
-      range.end.toISO(),
-    ].join("|");
-
-    return this.calendarCache.wrap(key, async () => {
-      const calendar = await this.calendarManager.getCalendar(
-        schedule.ownerPersonId,
-      );
-      // Busy events starting before the range can still overlap into it, so
-      // widen the query by a day rather than trusting the range boundary.
-      return calendar.listEvents({
-        calendarId: schedule.calendarId,
-        timeMin: range.start.minus({ days: 1 }).toJSDate(),
-        timeMax: range.end.plus({ days: 1 }).toJSDate(),
-      });
-    });
   }
 
   private parseRequestedRange(
