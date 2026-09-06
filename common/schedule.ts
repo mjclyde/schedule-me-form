@@ -19,6 +19,8 @@ export interface PublicSchedule {
   timeZone: string;
   durationMins: number;
   state: ScheduleState;
+  /** Whether the booking form must collect an email address. */
+  requireEmail?: boolean;
   /** Inclusive calendar dates ("YYYY-MM-DD") in `timeZone`, when configured. */
   startDate?: string;
   endDate?: string;

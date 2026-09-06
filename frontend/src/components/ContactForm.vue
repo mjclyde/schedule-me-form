@@ -25,16 +25,31 @@
           placeholder="(435) 555-1234" />
       </div>
     </div>
+    <div v-if="showEmail"
+      class="relative rounded-md rounded-t-none px-3 pb-1.5 pt-2.5 ring-1 ring-inset ring-gray-300 focus-within:z-10 focus-within:ring-2 focus-within:ring-sky-500">
+      <label for="email" class="block text-xs font-medium text-gray-500">
+        Email <span v-if="!emailRequired" class="text-gray-400">(optional — we’ll send a calendar invite)</span>
+      </label>
+      <div class="relative py-1">
+        <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-1">
+          <EnvelopeIcon class="h-5 w-5 text-gray-500" aria-hidden="true" />
+        </div>
+        <input v-model="email" type="email" name="email" id="email"
+          class="pl-10 block w-full border-0 p-0 text-gray-900 placeholder:text-gray-300 focus:ring-0 sm:leading-6"
+          placeholder="jane@example.com" />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { UserIcon, PhoneIcon } from '@heroicons/vue/20/solid'
+import { UserIcon, PhoneIcon, EnvelopeIcon } from '@heroicons/vue/20/solid'
 import { vMaska } from 'maska/vue';
 
-defineProps<{ phoneOnly?: boolean }>();
+defineProps<{ phoneOnly?: boolean; showEmail?: boolean; emailRequired?: boolean }>();
 
 const name = defineModel('name')
 const phone = defineModel('phone')
+const email = defineModel('email')
 
 </script>

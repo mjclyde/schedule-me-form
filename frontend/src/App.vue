@@ -2,7 +2,7 @@
   <MainHeader />
   <nav class="flex justify-center">
     <div class="grid gap-0.1 grid-cols-2 bg-gray-300 outline outline-1 outline-gray-300 rounded-md">
-      <RouterLink class="link rounded-bl-md rounded-tl-md" to="/">Sign Up</RouterLink>
+      <RouterLink class="link rounded-bl-md rounded-tl-md" to="/">Book</RouterLink>
       <RouterLink class="link rounded-br-md rounded-tr-md" to="/my-events">My Events</RouterLink>
     </div>
   </nav>
@@ -15,12 +15,15 @@
 import MainHeader from './components/MainHeader.vue';
 import { watchEffect } from 'vue';
 import { useEvent } from './store/event';
+import { useSchedule } from './store/schedule';
 
 const eventStore = useEvent();
+const scheduleStore = useSchedule();
 
 watchEffect(() => {
-  if (eventStore.event?.name) {
-    window.document.title = eventStore.event.name;
+  const name = scheduleStore.schedule?.name || eventStore.event?.name;
+  if (name) {
+    window.document.title = name;
   }
 })
 

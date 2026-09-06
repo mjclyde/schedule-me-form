@@ -1,11 +1,11 @@
 import { createWebHistory, createRouter, RouteRecordRaw } from "vue-router";
 import axios from "axios";
 
-import EventPicker from "./pages/EventPicker.vue";
+import BookingPage from "./pages/BookingPage.vue";
 import MyEvents from "./pages/MyEvents.vue";
 
 const routes: RouteRecordRaw[] = [
-  { path: "/", component: EventPicker, name: "event-picker" },
+  { path: "/", component: BookingPage, name: "booking" },
   { path: "/my-events", component: MyEvents, name: "my-events" },
   { path: "/otp/:otp", component: MyEvents, name: "otp" },
 ];
@@ -24,8 +24,19 @@ router.beforeEach(async (to, from, next) => {
     });
     next({ name: "my-events", query: { eventId: res.data._id } });
   }
-  if (from.query.eventId && !to.query.eventId) {
-    next({ ...to, query: { ...to.query, eventId: from.query.eventId } });
+  // Carry the current schedule/event across navigation so the nav links work
+  // without re-stating it. `eventId` still belongs to the old slot-based
+  // My Events page, which moves to bookings in the next phase.
+  const carried: Record<string, any> = { ...to.query };
+  let changed = false;
+  for (const key of ["scheduleId", "eventId"]) {
+    if (from.query[key] && !to.query[key]) {
+      carried[key] = from.query[key];
+      changed = true;
+    }
+  }
+  if (changed) {
+    next({ ...to, query: carried });
   } else {
     next();
   }

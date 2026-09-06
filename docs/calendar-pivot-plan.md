@@ -1,6 +1,6 @@
 # Architecture Pivot: Google Calendar as the Source of Truth
 
-Status: **Phases 1–2 complete**; Phases 3–5 not yet started
+Status: **Phases 1–3 complete**; Phases 4–5 not yet started
 Branch: `claude/google-calendar-integration-arch-sefqo2`
 
 ## Goal
@@ -446,14 +446,31 @@ curl "$API/Schedules/2026spring"
 curl "$API/Schedules/2026spring/Availability?from=2026-03-01&to=2026-03-31"
 ```
 
-**Phase 3 — Write path**
-- `POST /Schedules/:id/Bookings`: validate (incl. `bookableRange`) → insert → conflict
-  check → SMS.
-- Attendee invite when an email is supplied.
-- Frontend switches to the new endpoints (this is the visible cutover).
+**Phase 3 — Write path** ✅ *done*
+- `POST /Schedules/:id/Bookings`: validate → re-check availability → insert → conflict
+  check → invalidate cache → SMS. Returns `422` outside the window, `409` when the slot is
+  gone or the race is lost.
+- `AvailabilityService` extracted from `SchedulesAPI`, so booking validates a slot through
+  the same code path that produced it.
+- Attendee invite when an email is supplied (`sendUpdates: "all"`).
+- Frontend cut over: `BookingPage.vue` (replaces `EventPicker.vue`), `store/schedule.ts`
+  and `store/availability.ts`. Slots are keyed by `startAt` — no ids. Availability is a
+  per-visible-month range query, the calendar opens on the schedule's first bookable month,
+  month navigation is bounded by the window, and the four states render distinctly.
+- 107 tests.
+
+**The booking page is now `/?scheduleId=<slug>`**, not `?eventId=`.
+
+**Known gap until Phase 4:** `/my-events` still reads the old Mongo slots, so a booking made
+through the new page will not appear there. The confirmation SMS therefore deliberately does
+**not** include a manage link yet — sending people to a page that cannot show their booking
+would be worse than omitting it. Cancelling a new booking currently means editing the
+calendar directly.
 
 **Phase 4 — Lifecycle**
-- `GET /MyBookings`, `DELETE /Bookings/:id`.
+- `GET /MyBookings`, `DELETE /Bookings/:id`, and the OTP manage link restored to the
+  confirmation SMS.
+- `MyEvents.vue` moves off `store/slots.ts` / `store/event.ts` onto bookings.
 - Reminder cron reads the calendar and patches `reminderSentAt`; delete `findRemindersDue`.
 
 **Phase 5 — Teardown**

@@ -102,6 +102,7 @@ export class Schedule extends BaseDoc<ScheduleModel> implements ScheduleModel {
       timeZone: this.timeZone,
       durationMins: this.durationMins,
       state: this.getOpenState(now),
+      requireEmail: this.requireEmail,
       startDate: this.startDate,
       endDate: this.endDate,
       bookableFrom: range?.start.toISO() ?? undefined,

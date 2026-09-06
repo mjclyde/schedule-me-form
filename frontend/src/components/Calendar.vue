@@ -4,18 +4,22 @@
   >
     <div class="flex items-center text-gray-900">
       <button
-        @click="previousMonth()"
+        @click="store.previousMonth()"
         type="button"
-        class="-m-1.5 flex flex-none items-center justify-center p-1.5 text-gray-400 hover:text-gray-500"
+        :disabled="!store.canGoBack"
+        class="-m-1.5 flex flex-none items-center justify-center p-1.5 text-gray-400 hover:text-gray-500 disabled:opacity-25 disabled:hover:text-gray-400 disabled:cursor-default"
       >
         <span class="sr-only">Previous month</span>
         <ChevronLeftIcon class="h-8 w-8" aria-hidden="true" />
       </button>
-      <div class="flex-auto text-sm font-bold text-gray-500">{{ MonthNames[store.selectedMonth] }}</div>
+      <div class="flex-auto text-sm font-bold text-gray-500">
+        {{ MonthNames[store.selectedMonth] }} {{ store.selectedYear }}
+      </div>
       <button
-        @click="nextMonth()"
+        @click="store.nextMonth()"
         type="button"
-        class="-m-1.5 flex flex-none items-center justify-center p-1.5 text-gray-400 hover:text-gray-500"
+        :disabled="!store.canGoForward"
+        class="-m-1.5 flex flex-none items-center justify-center p-1.5 text-gray-400 hover:text-gray-500 disabled:opacity-25 disabled:hover:text-gray-400 disabled:cursor-default"
       >
         <span class="sr-only">Next month</span>
         <ChevronRightIcon class="h-8 w-8" aria-hidden="true" />
@@ -59,23 +63,9 @@
 
 <script setup lang="ts">
 import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/vue/20/solid";
-import { CalendarDay, useSlots, MonthNames } from "../store/slots";
+import { CalendarDay, useAvailability, MonthNames } from "../store/availability";
 
-const store = useSlots();
-
-function nextMonth() {
-  const date = new Date(store.selectedYear, store.selectedMonth, 1);
-  date.setMonth(date.getMonth() + 1);
-  store.selectedYear = date.getFullYear();
-  store.selectedMonth = date.getMonth();
-}
-
-function previousMonth() {
-  const date = new Date(store.selectedYear, store.selectedMonth, 1);
-  date.setMonth(date.getMonth() - 1);
-  store.selectedYear = date.getFullYear();
-  store.selectedMonth = date.getMonth();
-}
+const store = useAvailability();
 
 function selectDate(day: CalendarDay) {
   if (!day.slots?.length) {
