@@ -1,0 +1,350 @@
+# Architecture Pivot: Google Calendar as the Source of Truth
+
+Status: **plan / not yet implemented**
+Branch: `claude/google-calendar-integration-arch-sefqo2`
+
+## Goal
+
+Stop managing appointment slots as Mongo documents. Instead, point the app at a Google
+Calendar and say: *"let people book 15-minute appointments anywhere this calendar is free."*
+Availability is derived on demand from the calendar; a confirmed booking **is** a calendar
+event. Effectively a small, self-hosted Calendly.
+
+---
+
+## 1. How the app works today
+
+### Data model (Mongo)
+
+| Collection | Purpose |
+| --- | --- |
+| `events` | The thing people sign up for (`_id` is a slug like `2025tdfa`), plus `owners[]` for SMS notification and per-owner `syncGoogleCalendar` |
+| `slots` | Pre-created appointment slots: `eventId`, `startAt`, `durationMins`, `capacity.min/max`, and an embedded `persons[]` array of signups with `signedUpAt` / `reminderSentAt` |
+| `persons` | Name, phone, `optOutSMS`, a 6-char `otp` (value/expiresAt/eventId), and `googleTokens` |
+| `notifications` | Audit log of every Twilio SMS sent |
+
+### Flow
+
+1. An admin (manually / by script — there is no UI) creates an `event` and a batch of
+   `slots` via `POST /Slots`.
+2. The public page (`EventPicker.vue`) calls `GET /AvailableSlots?eventId=…`, which:
+   - runs a Mongo aggregation for future slots with `persons.length < capacity.max`,
+   - then, for each owner who linked a Google account, calls `GoogleCalendar.getBusyTime()`
+     and drops slots overlapping busy time. **The calendar is already read-only input to
+     availability today — this is the seed of the pivot.**
+3. `PUT /Slots/:id/SignUp` upserts the `person` by phone, `$push`es them onto `slot.persons`,
+   sends a confirmation SMS with an OTP deep link, and SMSes the event owners.
+4. `MyEvents.vue` authenticates with the OTP (`Authorization: <otp>` header, no bearer scheme),
+   lists the person's slots, and can cancel one (`DELETE /Slots/:slotId/Persons/:personId`).
+5. A cron (`0 12-18 * * *`, America/Denver) walks `findRemindersDue()` and SMSes a
+   24-hour reminder, stamping `persons.$.reminderSentAt`.
+6. Adding to the visitor's own calendar is a **manual `.ics` download**
+   (`GET /Slots/:id/CalendarEvent`).
+
+### Correction to a prior assumption
+
+The app does **not** auto-create a Google Calendar event when someone signs up. Nothing in
+the codebase calls `events.insert`. What the last commit (`6f9eb12`, "added basic google
+calendar integration") actually added was the *opposite* direction: OAuth token storage per
+person, and reading an owner's calendar to **filter out** slots that collide with their busy
+time. Writing to the calendar is new work in this pivot.
+
+### Stack
+
+- **Backend**: Express + a decorator-based DI/routing lib (`@ncss/api-decorator`), raw
+  `mongodb` driver, `hydratable` models, `googleapis`, `luxon`, `twilio`, `cron`. TS.
+- **Frontend**: Vue 3 + Pinia + `@vueuse/core` fetch + Tailwind + headlessui/heroicons.
+- **Shared**: `common/` is symlinked/copied into the backend image and imported by both.
+
+---
+
+## 2. Target architecture
+
+### The one-sentence version
+
+> A **Schedule** points at a Google calendar. Any *timed* event on that calendar marked
+> **Show as: Free** is a bookable window. Everything else on the calendar is busy.
+> Booking writes a real (opaque) event back to that calendar, tagged with
+> `extendedProperties.private` so the app can find its own bookings again.
+
+### Decisions taken
+
+| Question | Decision |
+| --- | --- |
+| How is availability marked? | **Any `transparency: "transparent"` event.** No title convention. |
+| Where do bookings live? | **Google only**, identified via `extendedProperties.private`. No Mongo booking/slot records. |
+| Attendee email | **Optional.** If provided, add as a GCal attendee (real invite). Keep `.ics` download as the phone-only fallback. |
+| Existing `2025tdfa` / `2025tdnl4` data | **Dropped.** No migration; clean break. |
+
+### What stays in Mongo
+
+- `persons` — phone, name, `optOutSMS`, OTP, Google tokens. Still needed: SMS and the OTP
+  login are the app's identity system, and Google can't hold refresh tokens for us.
+- `schedules` — the config (replaces `events`).
+- `notifications` — SMS audit log.
+
+### What leaves Mongo entirely
+
+- `slots` collection, `Slot` model, `SlotService`, `SlotAPI`, `common/slot.ts`, and the whole
+  `filterSlots` / `getStartAndEndOfSlots` block in `slots.api.ts`.
+
+---
+
+## 3. Availability rules
+
+A single `events.list` call over the requested window returns both the availability windows
+and the conflicts, because Google marks each event's transparency inline.
+
+**A calendar event is an availability window iff:**
+- `transparency === "transparent"` (Show as: Free), **and**
+- it is a **timed** event (`start.dateTime`, not `start.date`), **and**
+- `status !== "cancelled"`.
+
+**Everything else is busy**, i.e. any event without `transparency === "transparent"`.
+
+### Why the "timed" rule matters
+
+Google Calendar clients commonly default **all-day events to Free**. Without this rule, a
+single all-day "PTO" entry would turn an entire day into bookable time — the exact opposite
+of the intent. All-day Free events are therefore ignored (neither available nor busy).
+All-day *Busy* events still block, as they do today.
+
+### Slot generation (pure, unit-testable)
+
+```
+generateSlots({ windows, busy, durationMins, incrementMins,
+                bufferBeforeMins, bufferAfterMins, minNoticeMins, alignTo, now, tz })
+
+  windows := merge(overlapping availability windows)
+  for each window:
+    cursor := alignUp(max(window.start, now + minNotice), incrementMins, alignTo)
+    while cursor + durationMins <= window.end:
+      candidate := [cursor, cursor + durationMins]
+      padded   := [candidate.start - bufferBefore, candidate.end + bufferAfter]
+      if not overlapsAny(padded, busy): emit { startAt: cursor, endAt: candidate.end }
+      cursor += incrementMins
+```
+
+- `incrementMins` defaults to `durationMins` (back-to-back slots).
+- `alignTo: 'hour' | 'window'` — default `'hour'`, so a window starting at 9:07 still yields
+  9:15 / 9:30 / … rather than 9:07 / 9:22. Predictable times matter more than packing.
+- Bookings the app already made are opaque events, so they land in `busy` automatically.
+  **There is no separate "is it taken" check** — that is the main simplification.
+- All arithmetic in the calendar's `timeZone` via Luxon, so DST transitions inside a window
+  behave.
+
+---
+
+## 4. Booking representation
+
+A booking is a normal calendar event on the target calendar:
+
+```jsonc
+{
+  "summary": "Tune-Up — Jane Doe",        // from schedule.appointmentTitle template
+  "description": "Jane Doe\n(555) 123-4567\njane@example.com\n\nManage: <otp link>",
+  "start":  { "dateTime": "…", "timeZone": "America/Denver" },
+  "end":    { "dateTime": "…", "timeZone": "America/Denver" },
+  "transparency": "opaque",               // REQUIRED — this is what blocks re-booking
+  "attendees": [{ "email": "jane@example.com" }],   // only if email supplied
+  "extendedProperties": {
+    "private": {
+      "app": "schedule-me",
+      "scheduleId": "2026spring",
+      "personId": "<mongo person _id>",
+      "bookedAt": "2026-03-01T17:04:22.000Z",
+      "reminderSentAt": "…"               // patched in later by the reminder cron
+    }
+  }
+}
+```
+
+`events.list` supports `privateExtendedProperty=key=value` (repeatable, AND-ed), which gives
+us every query the app needs without a database:
+
+| Need | Query |
+| --- | --- |
+| This person's bookings | `privateExtendedProperty=[app=schedule-me, personId=<id>]` |
+| Reminders due | `privateExtendedProperty=app=schedule-me`, `timeMin=now`, `timeMax=now+~24h`, filter where `reminderSentAt` is absent |
+| Verify a booking on cancel | `events.get(eventId)`, check `private.personId` matches the OTP holder |
+
+Limits are not a concern: 1024 chars per value, 32 KB per event.
+
+### Double-booking
+
+Google has no conditional insert, so this is optimistic rather than locked:
+
+1. Recompute availability for the target day and confirm `startAt` is still offered.
+2. `events.insert`.
+3. Re-list events overlapping `[start, end)` carrying `app=schedule-me`. If more than one
+   exists and ours does not have the earliest `created` timestamp, `events.delete` ours and
+   return **409** so the UI shows "that time was just taken."
+
+The race window shrinks to a couple of hundred milliseconds and resolves deterministically
+(earliest `created` wins) with no lock table. For a one-owner booking page this is ample.
+
+### Trade-off being accepted
+
+The calendar is now the database. That means a booking edited or deleted directly in Google
+Calendar changes app state silently — no cancellation SMS fires, and the person's "My Events"
+list just changes. That is a genuine cost of "Google only," and the right mitigation later is
+a `watch`/push-notification channel; it is explicitly out of scope for v1.
+
+---
+
+## 5. Schedule model (replaces `Event`)
+
+```ts
+export interface ScheduleModel extends BaseModel {
+  _id: string;               // slug used in URLs, e.g. "2026spring"
+  name: string;              // page/document title
+  type: string;              // short label used in SMS copy, e.g. "Tune-Up"
+  description: string;
+
+  ownerPersonId: string;     // whose googleTokens + calendar we use
+  calendarId: string;        // target Google calendar
+  timeZone: string;          // cached from calendarList
+
+  durationMins: number;      // 15
+  incrementMins?: number;    // default = durationMins
+  bufferBeforeMins?: number;
+  bufferAfterMins?: number;
+  minNoticeMins?: number;    // default 60
+  maxDaysOut?: number;       // default 60
+  alignTo?: 'hour' | 'window';
+
+  appointmentTitle?: string; // template, default "{type} — {name}"
+  requireEmail?: boolean;
+  active?: boolean;
+
+  notify?: { id: string; name: string; phone: string }[];  // SMS on book/cancel
+}
+```
+
+`owners[]` collapses into `ownerPersonId` (single calendar + token source) plus `notify[]`
+(who gets an SMS). The current per-owner `syncGoogleCalendar` sub-document disappears.
+
+---
+
+## 6. API surface
+
+### New / changed
+
+| Method | Path | Auth | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/Schedules/:id` | public | Config for the booking page (duration, tz, description) |
+| `GET` | `/Schedules/:id/Availability?from=&to=` | public | **Ephemeral** `[{ startAt, endAt }]`. No ids. |
+| `POST` | `/Schedules/:id/Bookings` | public | `{ startAt, name, phone, email?, remindMe? }` → `{ bookingId, startAt, endAt }`; `409` on race |
+| `GET` | `/MyBookings` | OTP | Derived from the calendar |
+| `DELETE` | `/Bookings/:id` | OTP | Ownership checked via `extendedProperties.private.personId` |
+| `GET` | `/Bookings/:id/CalendarEvent` | public | `.ics` fallback, generated in memory |
+| `POST` | `/Schedules/:id/CreateOTP` | public | Rename of `/Events/:id/CreateOTP` |
+
+### Unchanged
+
+`GET /Google/Calendars` (OTP) — used by the owner to pick `calendarId`; `GET /GoogleAuth`
+and `/GoogleAuth/Redirect` (with the fixes in §8).
+
+### Deleted
+
+`GET /Slots`, `GET /AvailableSlots`, `GET /MySlots`, `POST /Slots`,
+`PUT /Slots/:id/SignUp`, `DELETE /Slots/:slotId/Persons/:personId`,
+`GET /Slots/:id/CalendarEvent`, and all of `/Events*`.
+
+### Guard rails on the public availability endpoint
+
+It is unauthenticated and proxies to Google, so:
+- clamp `to` to `from + maxDaysOut`, reject ranges longer than 62 days;
+- in-memory TTL cache keyed `${calendarId}:${dayISO}`, ~30s, to collapse the burst of
+  requests a single visitor's month-flipping produces.
+
+---
+
+## 7. Frontend changes
+
+- `common/slot.ts` → `common/booking.ts`:
+  `AvailableSlot { startAt: string; endAt: string }`, `BookingRequest`, `Booking`.
+- `store/event.ts` → `store/schedule.ts`; `store/slots.ts` → `store/availability.ts`.
+- **Slots lose their `_id`** — selection is keyed by ISO `startAt`. `Calendar.vue` and
+  `Slots.vue` need that swap; `durationMins` moves from the slot to the schedule config.
+- Availability becomes a **range query per visible month** instead of one fetch-everything
+  call, so `fetchSlots()` re-runs on month navigation. This also removes the current
+  "jump to the month containing the first slot" heuristic in favour of "start at today."
+- `EventPicker.vue`: add an optional email field; POST to `/Schedules/:id/Bookings`; handle
+  `409` with the existing "no longer available" alert.
+- `MyEvents.vue`: bookings instead of slots; cancel by booking id.
+- Show the **schedule's timezone** next to the times. The browser renders in the visitor's
+  local zone, and without a label that is a reliable source of confusion.
+
+---
+
+## 8. Bugs found while reading (fix as we go)
+
+1. **`persons.api.ts:41` — OAuth `state` is always `undefined`.** `state: req.params.personId`
+   on a route with no `:personId` param. `/GoogleAuth/Redirect` therefore can't resolve who
+   authorised, and calendar linking silently fails. Should be `req.query.id`.
+2. **`GET /GoogleAuth` is unauthenticated** and takes the person id from the query string, so
+   anyone can start a flow for any person id; the redirect then writes tokens under whatever
+   `state` says. Gate it behind OTP auth and sign/expire the `state` value.
+3. **`OAuthClientManager` caches an `OAuth2Client` per person forever** and never persists
+   refreshed access tokens. It works (the refresh token is stored), but a revoked or rotated
+   grant stays cached for the life of the process. Add a `tokens` listener that persists, and
+   evict on refresh failure.
+4. **`slot.service.ts findAvailable`** — `{ $lt: [{ $size: "$persons" }, "$capacity.max"] }`
+   evaluates false when `capacity.max` is absent, so any slot without an explicit max is
+   never bookable. Moot after the pivot, but it explains any "slot never appeared" reports.
+5. **`app.ts` hardcodes `2025tdfa` / `2025tdnl4`** in the reminder cron. Should iterate
+   active schedules.
+6. **`slots.api.ts` `.ics` handling** writes the file into the process CWD and unlinks after
+   download — racy and leaks on failed downloads. Build the string in memory and `res.send`.
+7. **`backend/test/index.spec.ts` imports `Thing` from `../src/index`, which does not exist** —
+   the suite cannot compile, so `npm test` is currently dead. Worth fixing in Phase 1, since
+   the slot-generation engine is exactly the kind of logic that wants tests.
+8. Hardcoded `America/Denver` in `utils/formatTime.ts`, `reminders.ts`, and `slots.api.ts`
+   message builders. Replace with the schedule's `timeZone`.
+
+---
+
+## 9. Phasing
+
+Each phase is independently shippable and leaves the app working.
+
+**Phase 1 — Foundation (no behaviour change)**
+- Fix bugs 1–3 and 7.
+- Extend `GoogleCalendar` with `insertEvent`, `patchEvent`, `deleteEvent`, and
+  `listAppEvents(privateProps)`.
+- Add `google/availability.ts`: pure `splitWindowsAndBusy(events)` + `generateSlots(...)`,
+  with unit tests covering DST, all-day-Free exclusion, buffers, min-notice, and alignment.
+
+**Phase 2 — Read path**
+- `Schedule` model + `ScheduleService`; seed one schedule by hand.
+- `GET /Schedules/:id` and `GET /Schedules/:id/Availability` + the TTL cache.
+- Verifiable end-to-end with `curl` against a real calendar before any UI moves.
+
+**Phase 3 — Write path**
+- `POST /Schedules/:id/Bookings`: validate → insert → conflict check → SMS.
+- Attendee invite when an email is supplied.
+- Frontend switches to the new endpoints (this is the visible cutover).
+
+**Phase 4 — Lifecycle**
+- `GET /MyBookings`, `DELETE /Bookings/:id`.
+- Reminder cron reads the calendar and patches `reminderSentAt`; delete `findRemindersDue`.
+
+**Phase 5 — Teardown**
+- Delete `Slot` model/service/API and `common/slot.ts`.
+- Drop the `slots` and `events` collections.
+- README/setup notes: how to mark a window Free, how to link the calendar.
+
+---
+
+## 10. Open questions (not blocking Phase 1)
+
+- **Capacity > 1.** The current model supports `capacity.min/max`; the calendar-backed design
+  is 1-per-slot (Calendly-style). If group slots are still needed, the natural encoding is a
+  count parsed from the availability event (e.g. a `x3` suffix) with the app counting its own
+  bookings in the window instead of relying on opacity. Deferred until there's a real use.
+- **Owner-facing setup UI.** Schedules are still created by hand. A small admin page
+  (pick calendar → set duration → get a share link) is what turns this from "my app" into
+  the Calendly replacement, but it is a separate piece of work.
+- **Push notifications.** A Google `watch` channel would close the "edited directly in
+  Calendar" gap in §4. Out of scope for v1.
