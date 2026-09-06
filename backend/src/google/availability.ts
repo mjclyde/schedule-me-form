@@ -155,6 +155,25 @@ export function generateSlots(params: GenerateSlotsParams): TimeRange[] {
   return slots;
 }
 
+/**
+ * Trims ranges to `bound`, dropping any that fall entirely outside it.
+ *
+ * Availability windows routinely extend past the range the caller asked about
+ * (a window running to 5pm when the request ends at noon); without this they
+ * would yield slots outside the requested range.
+ */
+export function clampRanges(ranges: TimeRange[], bound: TimeRange): TimeRange[] {
+  const clamped: TimeRange[] = [];
+  for (const range of ranges) {
+    const start = range.start > bound.start ? range.start : bound.start;
+    const end = range.end < bound.end ? range.end : bound.end;
+    if (start < end) {
+      clamped.push({ start, end });
+    }
+  }
+  return clamped;
+}
+
 /** Half-open overlap: touching ranges (a.end === b.start) do not conflict. */
 export function overlaps(a: TimeRange, b: TimeRange) {
   return a.start < b.end && b.start < a.end;

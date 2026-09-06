@@ -2,6 +2,7 @@ import { assert } from "chai";
 import { DateTime } from "luxon";
 import {
   CalendarEventLike,
+  clampRanges,
   generateSlots,
   mergeRanges,
   splitWindowsAndBusy,
@@ -165,6 +166,44 @@ describe("mergeRanges", () => {
     mergeRanges(input);
 
     assert.equal(input[0].end.toFormat("HH:mm"), "10:00");
+  });
+});
+
+describe("clampRanges", () => {
+  const bound: TimeRange = {
+    start: at("2026-03-02T09:00"),
+    end: at("2026-03-02T17:00"),
+  };
+
+  it("trims a range that overhangs the bound on both sides", () => {
+    const [clamped] = clampRanges(
+      [{ start: at("2026-03-02T08:00"), end: at("2026-03-02T18:00") }],
+      bound,
+    );
+
+    assert.equal(clamped.start.toFormat("HH:mm"), "09:00");
+    assert.equal(clamped.end.toFormat("HH:mm"), "17:00");
+  });
+
+  it("leaves a range already inside the bound untouched", () => {
+    const inside = { start: at("2026-03-02T10:00"), end: at("2026-03-02T11:00") };
+    const [clamped] = clampRanges([inside], bound);
+
+    assert.equal(clamped.start.toFormat("HH:mm"), "10:00");
+    assert.equal(clamped.end.toFormat("HH:mm"), "11:00");
+  });
+
+  it("drops ranges outside the bound, including ones that merely touch it", () => {
+    assert.isEmpty(
+      clampRanges(
+        [
+          { start: at("2026-03-01T09:00"), end: at("2026-03-01T17:00") },
+          { start: at("2026-03-02T17:00"), end: at("2026-03-02T18:00") },
+          { start: at("2026-03-02T08:00"), end: at("2026-03-02T09:00") },
+        ],
+        bound,
+      ),
+    );
   });
 });
 

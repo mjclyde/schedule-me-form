@@ -1,6 +1,6 @@
 # Architecture Pivot: Google Calendar as the Source of Truth
 
-Status: **Phase 1 complete**; Phases 2–5 not yet started
+Status: **Phases 1–2 complete**; Phases 3–5 not yet started
 Branch: `claude/google-calendar-integration-arch-sefqo2`
 
 ## Goal
@@ -289,7 +289,7 @@ state and needs different copy.
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
 | `GET` | `/Schedules/:id` | public | Config for the booking page (duration, tz, description) + the resolved `bookableRange` and open/closed state |
-| `GET` | `/Schedules/:id/Availability?from=&to=` | public | **Ephemeral** `[{ startAt, endAt }]`. No ids. Range clamped to `bookableRange`. |
+| `GET` | `/Schedules/:id/Availability?from=&to=` | public | `{ timeZone, state, slots: [{ startAt, endAt }] }`. Slots are **ephemeral** — no ids. Range clamped to `bookableRange`. |
 | `POST` | `/Schedules/:id/Bookings` | public | `{ startAt, name, phone, email?, remindMe? }` → `{ bookingId, startAt, endAt }`; `409` on race, `422` if outside `bookableRange` |
 | `GET` | `/MyBookings` | OTP | Derived from the calendar |
 | `DELETE` | `/Bookings/:id` | OTP | Ownership checked via `extendedProperties.private.personId` |
@@ -406,13 +406,45 @@ curl -H "Authorization: <otp>" $API/Google/Calendars # -> pick the calendarId
 
 `OAUTH_STATE_SECRET` is optional; it falls back to `GOOGLE_CLIENT_SECRET`.
 
-**Phase 2 — Read path**
-- `Schedule` model + `ScheduleService`; seed one schedule by hand.
-- Pure `getBookableRange(schedule, now)` (§5.1) + tests: window/rolling intersection,
-  inclusive `endDate`, and the tz boundary (a Denver schedule ending "2026-05-31" must stay
-  open through 23:59 local, not cut off at 18:00).
-- `GET /Schedules/:id` and `GET /Schedules/:id/Availability` + clamping + the TTL cache.
-- Verifiable end-to-end with `curl` against a real calendar before any UI moves.
+**Phase 2 — Read path** ✅ *done*
+- `Schedule` model + `ScheduleService`, with pure `getBookableRange()` / `getOpenState()`
+  and `toPublic()`, which strips `calendarId`, `ownerPersonId` and `notify` — the endpoint
+  is public.
+- `GET /Schedules/:id` and `GET /Schedules/:id/Availability`, with range clamping, a 30s
+  `TtlCache` that also de-duplicates in-flight calls, and a 62-day ceiling.
+- `common/schedule.ts` carries the shared `PublicSchedule` / `AvailabilityResponse` types.
+- 80 tests total. The API specs drive the class with a stubbed store and calendar, so the
+  clamping, the four states, and "no Google call outside the window" are all covered
+  without Mongo or Google.
+
+**Seeding a schedule** (no admin UI yet; creation stays server-side because a schedule
+names the owner's calendar and carries notify phone numbers):
+
+```sh
+npm run schedule -- ./my-schedule.json
+```
+
+```jsonc
+{
+  "_id": "2026spring",              // the slug in the public URL
+  "name": "Spring Tune-Ups 2026",
+  "type": "Tune-Up",                // used in SMS copy
+  "description": "15-minute tune-up appointments.",
+  "ownerPersonId": "<person _id>",  // must have linked Google
+  "calendarId": "you@example.com",
+  "timeZone": "America/Denver",
+  "durationMins": 15,
+  "startDate": "2026-03-01",
+  "endDate": "2026-05-31"
+}
+```
+
+Then, with some Free events on the calendar:
+
+```sh
+curl "$API/Schedules/2026spring"
+curl "$API/Schedules/2026spring/Availability?from=2026-03-01&to=2026-03-31"
+```
 
 **Phase 3 — Write path**
 - `POST /Schedules/:id/Bookings`: validate (incl. `bookableRange`) → insert → conflict

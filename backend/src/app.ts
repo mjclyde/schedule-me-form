@@ -23,15 +23,18 @@ import { ProcessReminders } from "./reminders";
 import { CronJob } from "cron";
 import { PersonsAPI } from "./api/persons.api";
 import { SetOTPAuthInjector } from "./middleware/otpAuthorization";
+import { ScheduleService } from "./services/schedule.service";
+import { SchedulesAPI } from "./api/schedules.api";
 
 const SERVICES: InjectableConstructor[] = [
   EventService,
   SlotService,
   PersonService,
   NotificationService,
+  ScheduleService,
 ];
 
-const APIS: APIConstructor[] = [EventAPI, SlotAPI, PersonsAPI];
+const APIS: APIConstructor[] = [EventAPI, SlotAPI, PersonsAPI, SchedulesAPI];
 
 export class App {
   private app: Application;
