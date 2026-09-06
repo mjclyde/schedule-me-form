@@ -1,6 +1,6 @@
 # Architecture Pivot: Google Calendar as the Source of Truth
 
-Status: **plan / not yet implemented**
+Status: **Phase 1 complete**; Phases 2–5 not yet started
 Branch: `claude/google-calendar-integration-arch-sefqo2`
 
 ## Goal
@@ -344,16 +344,22 @@ It is unauthenticated and proxies to Google, so:
 
 ## 8. Bugs found while reading (fix as we go)
 
-1. **`persons.api.ts:41` — OAuth `state` is always `undefined`.** `state: req.params.personId`
-   on a route with no `:personId` param. `/GoogleAuth/Redirect` therefore can't resolve who
-   authorised, and calendar linking silently fails. Should be `req.query.id`.
-2. **`GET /GoogleAuth` is unauthenticated** and takes the person id from the query string, so
-   anyone can start a flow for any person id; the redirect then writes tokens under whatever
-   `state` says. Gate it behind OTP auth and sign/expire the `state` value.
-3. **`OAuthClientManager` caches an `OAuth2Client` per person forever** and never persists
-   refreshed access tokens. It works (the refresh token is stored), but a revoked or rotated
-   grant stays cached for the life of the process. Add a `tokens` listener that persists, and
-   evict on refresh failure.
+Items 1–3, 7 and 9 are **fixed** in Phase 1.
+
+1. ~~**`persons.api.ts:41` — OAuth `state` is always `undefined`.**~~ `state: req.params.personId`
+   on a route with no `:personId` param. Google therefore omitted `state` from the callback,
+   and `/GoogleAuth/Redirect` hit a bare `return;` — never responding, never saving tokens.
+   **Calendar linking could never complete.** Fixed by deriving the person from the
+   authenticated session instead of the request.
+2. ~~**`GET /GoogleAuth` is unauthenticated**~~ and took the person id from the query string,
+   so anyone could start a flow for any person id and the redirect would write tokens under
+   whatever `state` said. Replaced by `GET /Google/AuthUrl` behind OTP auth, which returns
+   the consent URL as JSON rather than redirecting — a redirect is a browser navigation and
+   cannot carry the OTP header, which is precisely what forced the id into the query string.
+   `state` is now HMAC-signed and expires in 10 minutes (`src/google/oauthState.ts`).
+3. ~~**`OAuthClientManager` caches an `OAuth2Client` per person forever**~~ and never persisted
+   refreshed access tokens. Fixed with a `tokens` listener that writes them back, plus an
+   `evict()` for re-link/revoke.
 4. **`slot.service.ts findAvailable`** — `{ $lt: [{ $size: "$persons" }, "$capacity.max"] }`
    evaluates false when `capacity.max` is absent, so any slot without an explicit max is
    never bookable. Moot after the pivot, but it explains any "slot never appeared" reports.
@@ -363,11 +369,16 @@ It is unauthenticated and proxies to Google, so:
    bookable day, so their reminders are still due after it.
 6. **`slots.api.ts` `.ics` handling** writes the file into the process CWD and unlinks after
    download — racy and leaks on failed downloads. Build the string in memory and `res.send`.
-7. **`backend/test/index.spec.ts` imports `Thing` from `../src/index`, which does not exist** —
-   the suite cannot compile, so `npm test` is currently dead. Worth fixing in Phase 1, since
-   the slot-generation engine is exactly the kind of logic that wants tests.
+7. ~~**`backend/test/index.spec.ts` imports `Thing` from `../src/index`, which does not exist**~~ —
+   the suite could not compile, so `npm test` was dead. Removed; real specs took its place.
 8. Hardcoded `America/Denver` in `utils/formatTime.ts`, `reminders.ts`, and `slots.api.ts`
    message builders. Replace with the schedule's `timeZone`.
+9. ~~**`GoogleCalendar.listEvents` paginated in an infinite loop.**~~ It tracked
+   `nextPageToken` but never fed it back into the request, so any range holding more events
+   than Google's page size (250 by default) re-fetched page one forever — hanging the request
+   and growing the array without bound. Latent today because the slot windows are small; it
+   would have fired on the first busy calendar queried over a multi-month range, which is
+   exactly what this pivot introduces. Fixed.
 
 ---
 
@@ -375,12 +386,25 @@ It is unauthenticated and proxies to Google, so:
 
 Each phase is independently shippable and leaves the app working.
 
-**Phase 1 — Foundation (no behaviour change)**
-- Fix bugs 1–3 and 7.
-- Extend `GoogleCalendar` with `insertEvent`, `patchEvent`, `deleteEvent`, and
-  `listAppEvents(privateProps)`.
-- Add `google/availability.ts`: pure `splitWindowsAndBusy(events)` + `generateSlots(...)`,
-  with unit tests covering DST, all-day-Free exclusion, buffers, min-notice, and alignment.
+**Phase 1 — Foundation (no behaviour change)** ✅ *done*
+- Fixed bugs 1–3, 7 and 9.
+- `GoogleCalendar` gained `getEvent`, `insertEvent`, `patchEvent`, `deleteEvent` and
+  `listAppEvents`.
+- `google/bookingTags.ts`: builds/reads the `extendedProperties.private` payload and the
+  `privateExtendedProperty` query filters.
+- `google/availability.ts`: pure `splitWindowsAndBusy()` + `generateSlots()`, with 40 unit
+  tests across the three new modules covering DST in both directions, all-day-Free exclusion,
+  buffers, min-notice, alignment, window merging, and state tampering/expiry.
+
+**Linking a calendar now** (there is still no UI — Phase 5's admin page is the fix):
+
+```sh
+curl -H "Authorization: <otp>" $API/Google/AuthUrl   # -> {"url": "https://accounts.google.com/..."}
+# open that url in a browser, approve, land on /GoogleAuth/Redirect
+curl -H "Authorization: <otp>" $API/Google/Calendars # -> pick the calendarId
+```
+
+`OAUTH_STATE_SECRET` is optional; it falls back to `GOOGLE_CLIENT_SECRET`.
 
 **Phase 2 — Read path**
 - `Schedule` model + `ScheduleService`; seed one schedule by hand.

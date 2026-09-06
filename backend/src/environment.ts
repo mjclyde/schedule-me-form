@@ -43,6 +43,15 @@ export class Environment {
     return process.env.GOOGLE_REDIRECT_URL;
   }
 
+  /**
+   * Signing key for the OAuth `state` value. Falls back to the Google client
+   * secret so existing deployments keep working without a new variable; both
+   * are server-side secrets of the same sensitivity.
+   */
+  public static get OAUTH_STATE_SECRET() {
+    return process.env.OAUTH_STATE_SECRET || process.env.GOOGLE_CLIENT_SECRET || "";
+  }
+
   private static clean(variable?: string, defaultValue = "") {
     return (variable || defaultValue).replace(/"/gi, "");
   }
