@@ -8,7 +8,8 @@
     "dev": "nodemon src/index.ts",
     "test": "nyc mocha --colors",
     "test:watch": "nyc mocha -w --colors",
-    "schedule": "ts-node src/scripts/upsertSchedule.ts"
+    "schedule": "ts-node src/scripts/upsertSchedule.ts",
+    "owner": "ts-node src/scripts/createOwner.ts"
   },
   "author": "",
   "license": "ISC",

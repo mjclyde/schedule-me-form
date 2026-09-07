@@ -373,6 +373,13 @@ Items 1–3, 7 and 9 are **fixed** in Phase 1.
    the suite could not compile, so `npm test` was dead. Removed; real specs took its place.
 8. Hardcoded `America/Denver` in `utils/formatTime.ts`, `reminders.ts`, and `slots.api.ts`
    message builders. Replace with the schedule's `timeZone`.
+10. **`PersonService.createOTP` does not upsert**, and persons are only ever created by
+   booking. So `POST /Events/:id/CreateOTP` returns 500 for a phone number that has never
+   signed up (the "Find My Events" form's likely failure mode), and — worse — the OTP flow
+   cannot bootstrap itself at all: linking a calendar needs an OTP, an OTP needs a person,
+   and a person needs a booking, which needs a linked calendar. Worked around by
+   `npm run owner` (see docs/testing-the-pivot.md); the 500 is in the old slot path that
+   Phase 4 replaces.
 9. ~~**`GoogleCalendar.listEvents` paginated in an infinite loop.**~~ It tracked
    `nextPageToken` but never fed it back into the request, so any range holding more events
    than Google's page size (250 by default) re-fetched page one forever — hanging the request
@@ -418,7 +425,8 @@ curl -H "Authorization: <otp>" $API/Google/Calendars # -> pick the calendarId
   without Mongo or Google.
 
 **Seeding a schedule** (no admin UI yet; creation stays server-side because a schedule
-names the owner's calendar and carries notify phone numbers):
+names the owner's calendar and carries notify phone numbers). See
+**docs/testing-the-pivot.md** for the full end-to-end runbook:
 
 ```sh
 npm run schedule -- ./my-schedule.json
