@@ -6,11 +6,14 @@
  * The cron only starts when `ENV=PROD`, so this is how the sweep gets
  * exercised locally without waiting on `0 12-18 * * *`.
  *
- * This sends REAL text messages to anyone with an appointment in the next 24
- * hours who has not already been reminded, and stamps `reminderSentAt` on
- * their calendar event so the next sweep skips them. With no Twilio
- * credentials configured the send fails, which the sweep logs and skips,
- * leaving the booking unstamped for a later retry.
+ * This sends REAL text messages to anyone with an appointment between now and
+ * the end of tomorrow who has not already been reminded, and stamps
+ * `reminderSentAt` on their calendar event so the next sweep skips them.
+ *
+ * Twilio credentials are required to run it at all: NotificationService builds
+ * a Twilio client in its constructor, which throws on a missing SID, so
+ * registration fails before any sweep starts. (The server has the same
+ * requirement, for the same reason.)
  */
 import { Injector, InjectableConstructor } from "@ncss/api-decorator";
 import { DateTime } from "luxon";
@@ -18,7 +21,7 @@ import { DB } from "../db";
 import { NotificationService } from "../services/notification.service";
 import { PersonService } from "../services/person.service";
 import { ScheduleService } from "../services/schedule.service";
-import { Reminders } from "../reminders";
+import { Reminders, reminderWindowEnd } from "../reminders";
 
 const SERVICES: InjectableConstructor[] = [
   ScheduleService,
@@ -33,7 +36,7 @@ async function main() {
   }
 
   const now = DateTime.now();
-  console.log(`Sweeping for reminders due before ${now.plus({ hours: 24 })}`);
+  console.log(`Sweeping for reminders due before ${reminderWindowEnd(now)}`);
   await new Reminders(injector).run(now);
   console.log("Sweep complete.");
 }

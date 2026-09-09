@@ -25,7 +25,9 @@ end to end, and then managing it. Everything here is Phases 1–4; see
   GOOGLE_REDIRECT_URL=http://localhost:3000/GoogleAuth/Redirect
   # OAUTH_STATE_SECRET is optional; it falls back to GOOGLE_CLIENT_SECRET.
 
-  # Twilio is only needed if you want the confirmation SMS to actually send.
+  # Required. NotificationService builds a Twilio client in its constructor,
+  # which throws on a missing SID — so the server and `npm run reminders` both
+  # fail to start without these, not just the SMS.
   TWILIO_SID=...
   TWILIO_SECRET_TOKEN=...
   TWILIO_MESSAGING_SERVICE_ID=...
@@ -178,16 +180,15 @@ Both answer the same `404` on purpose.
 ## 8. Reminders
 
 The cron only starts when `ENV=PROD`, so run one sweep by hand rather than
-waiting on `0 12-18 * * *`. Book something inside the next 24 hours first:
+waiting on `0 12-18 * * *`. Book something for later today or tomorrow first:
 
 ```sh
 npm run reminders
 ```
 
-This sends **real** text messages to anyone with an appointment in the next 24
-hours who has not already been reminded. With no Twilio credentials configured
-the send fails, the sweep logs and skips it, and the booking stays unstamped
-for a later retry.
+This sends **real** text messages to anyone with an appointment between now and
+the end of tomorrow who has not already been reminded. Twilio credentials are
+required to run it at all — see the note in §0.
 
 After a successful sweep the calendar event gains a `reminderSentAt` in its
 private extended properties, and a second sweep is a no-op — that stamp is the

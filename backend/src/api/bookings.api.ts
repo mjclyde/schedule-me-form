@@ -168,6 +168,13 @@ export class BookingsAPI {
     }
     const { schedule, booking, calendar } = found;
 
+    // /MyBookings returns 90 days of history, so a past booking is reachable.
+    // Deleting one would remove a real calendar record and text the person and
+    // the notify list that an appointment they already attended was cancelled.
+    if (new Date(booking.endAt) < new Date()) {
+      return res.status(409).send("That appointment has already happened");
+    }
+
     await calendar.deleteEvent(schedule.calendarId, booking.id, {
       sendUpdates: "all",
     });
@@ -244,8 +251,16 @@ export class BookingsAPI {
       return null;
     }
 
+    // The event's own tag is authoritative about which schedule it belongs to;
+    // `?scheduleId=` only chose the calendar to look in. Two schedules sharing
+    // one calendar is the normal case, so without this check a caller could
+    // cancel their booking of schedule B while naming A — texting A's
+    // appointment type and dropping A's availability cache instead of B's.
     const booking = toMyBooking(event, schedule);
-    return booking ? { schedule, booking, calendar } : null;
+    if (!booking || booking.scheduleId !== schedule._id) {
+      return null;
+    }
+    return { schedule, booking, calendar };
   }
 
   /**
@@ -279,16 +294,17 @@ export class BookingsAPI {
    * An OTP deep link to the caller's bookings, or undefined if one cannot be
    * minted — the booking still stands, so a missing link is not a failure.
    *
-   * Reuses a live OTP already scoped to this schedule rather than rotating it,
-   * so an earlier confirmation's link keeps working.
+   * Reuses *any* live OTP, whatever schedule it was minted for. `createOTP`
+   * replaces the whole `otp` sub-document, so rotating here would silently
+   * kill the link in every text the person already holds — including the
+   * first booking's confirmation when they book a second schedule, and a
+   * schedule owner's Google-linking OTP if they book on their own schedule.
+   * `/MyBookings` is person-scoped, so an OTP minted elsewhere still lists
+   * this booking.
    */
   private async manageLink(person: Person, schedule: Schedule) {
     try {
-      if (
-        person.otp?.value &&
-        person.otp.scheduleId === schedule._id &&
-        person.isValidOtp(person.otp.value)
-      ) {
+      if (person.otp?.value && person.isValidOtp(person.otp.value)) {
         return CreateOTPLink(person.otp.value);
       }
       const updated = await this.persons.createOTP(person.phone, {

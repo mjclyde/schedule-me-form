@@ -69,20 +69,40 @@ export class SchedulesAPI {
     }
 
     const phone = FormatPhoneNumber(req.body.phone);
-    const person = await this.persons.createOTP(phone, {
-      scheduleId: schedule._id,
-    });
+    const person = await this.ensureOTP(phone, schedule._id);
     if (person?.otp?.value) {
-      await this.notifications.send({
-        personId: person._id,
-        name: person.name,
-        phone,
-        message:
-          `Hi ${person.name}, use this link to view your ` +
-          `${schedule.type} appointments: ${CreateOTPLink(person.otp.value)}`,
-      });
+      // A Twilio outage must not turn this into a 500: that would both break
+      // the uniform answer above and report failure for an OTP that is live.
+      await this.notifications
+        .send({
+          personId: person._id,
+          name: person.name,
+          phone,
+          message:
+            `Hi ${person.name}, use this link to view your ` +
+            `${schedule.type} appointments: ${CreateOTPLink(person.otp.value)}`,
+        })
+        .catch((err) => console.error(`Failed to send OTP link: ${err}`));
     }
     res.sendStatus(204);
+  }
+
+  /**
+   * The person's OTP, minting one only if they do not already hold a live one.
+   *
+   * `createOTP` replaces the whole `otp` sub-document, so rotating on every
+   * request would kill the link in every text they already have — and would
+   * let anyone who knows their number churn their access token at will.
+   */
+  private async ensureOTP(phone: string, scheduleId: string) {
+    const existing = await this.persons.findByPhone(phone);
+    if (!existing) {
+      return null;
+    }
+    if (existing.otp?.value && existing.isValidOtp(existing.otp.value)) {
+      return existing;
+    }
+    return this.persons.createOTP(phone, { scheduleId });
   }
 
   @API("get", "/Schedules/:id")

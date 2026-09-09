@@ -35,8 +35,10 @@ function bookingEvent(overrides: any = {}) {
   return {
     id: "evt1",
     status: "confirmed",
-    start: { dateTime: at("2026-03-02T09:00").toISO() },
-    end: { dateTime: at("2026-03-02T09:15").toISO() },
+    // Far future by default: cancelling refuses an appointment that has
+    // already happened, so a fixture pinned to a real past date would rot.
+    start: { dateTime: at("2099-03-02T09:00").toISO() },
+    end: { dateTime: at("2099-03-02T09:15").toISO() },
     extendedProperties: { private: tags },
     ...overrides,
   };
@@ -339,6 +341,57 @@ describe("DELETE /Bookings/:id", () => {
 
     assert.equal(res.code, 404);
     assert.isEmpty(calls.deleted);
+  });
+
+  it("refuses a booking tagged for a different schedule on the same calendar", async () => {
+    // Two schedules sharing one calendar is the documented normal case. Only
+    // the event's own tag says which it belongs to; without checking it, the
+    // cancellation SMS names the wrong appointment type and the wrong
+    // schedule's availability cache is dropped.
+    const { api, calls } = buildApi({
+      schedules: [
+        makeSchedule({ _id: "2026spring" }),
+        makeSchedule({ _id: "2026fall", name: "Fall" }),
+      ],
+      events: {
+        "owner@example.com": [bookingEvent({ tags: { scheduleId: "2026fall" } })],
+      },
+    });
+    const res = fakeRes();
+
+    await api.cancel(
+      authed({ params: { id: "evt1" }, query: { scheduleId: "2026spring" } }),
+      res as any,
+    );
+
+    assert.equal(res.code, 404);
+    assert.isEmpty(calls.deleted);
+  });
+
+  it("refuses to cancel an appointment that has already happened", async () => {
+    // /MyBookings deliberately returns 90 days of history. Deleting one would
+    // remove a real calendar record and text everyone that an appointment
+    // they already attended "has been cancelled".
+    const { api, calls } = buildApi({
+      events: {
+        "owner@example.com": [
+          bookingEvent({
+            start: { dateTime: at("2020-03-02T09:00").toISO() },
+            end: { dateTime: at("2020-03-02T09:15").toISO() },
+          }),
+        ],
+      },
+    });
+    const res = fakeRes();
+
+    await api.cancel(
+      authed({ params: { id: "evt1" }, query: { scheduleId: "2026spring" } }),
+      res as any,
+    );
+
+    assert.equal(res.code, 409);
+    assert.isEmpty(calls.deleted);
+    assert.isEmpty(calls.sms);
   });
 
   it("404s an unknown event or schedule", async () => {

@@ -113,7 +113,13 @@ function buildJob(options: HarnessOptions = {}) {
       if ((options.brokenCalendars || []).includes(params.calendarId)) {
         throw new Error("invalid_grant");
       }
-      return events[params.calendarId] || [];
+      // Honour the requested window, so a test can pin what the sweep asks for.
+      return (events[params.calendarId] || []).filter((e: any) => {
+        const start = new Date(e.start.dateTime).getTime();
+        return (
+          start >= params.timeMin.getTime() && start < params.timeMax.getTime()
+        );
+      });
     },
     patchEvent: async (_calendarId: string, eventId: string, body: any) => {
       calls.patched.push({ eventId, body });
@@ -208,6 +214,57 @@ describe("Reminders.run", () => {
     await job.run(at("2026-03-01T13:00", "America/New_York"));
 
     assert.include(calls.sms[0].message, "9:00 AM");
+  });
+
+  it("reminds about an appointment late on the following day", async () => {
+    // The cron only runs 12:00-18:00, so a flat now+24h window never reaches
+    // tomorrow evening: an 19:00 appointment would first be seen at noon on
+    // the day itself, with ~7 hours' notice and a text reading "on <today>".
+    const { job, calls } = buildJob({
+      events: {
+        "owner@example.com": [
+          bookingEvent({
+            start: { dateTime: at("2026-03-02T19:00").toISO() },
+            end: { dateTime: at("2026-03-02T19:15").toISO() },
+          }),
+        ],
+      },
+    });
+
+    await job.run(at("2026-03-01T13:00"));
+
+    assert.lengthOf(calls.sms, 1);
+    assert.include(calls.sms[0].message, "tomorrow");
+  });
+
+  it("does not reach two days out", async () => {
+    const { job, calls } = buildJob({
+      events: {
+        "owner@example.com": [
+          bookingEvent({
+            start: { dateTime: at("2026-03-03T09:00").toISO() },
+            end: { dateTime: at("2026-03-03T09:15").toISO() },
+          }),
+        ],
+      },
+    });
+
+    await job.run(at("2026-03-01T13:00"));
+
+    assert.isEmpty(calls.sms);
+  });
+
+  it("keeps going when one schedule has an unparsable date", async () => {
+    // getOpenState throws on a bad date string. Thrown from the loop itself it
+    // would skip every remaining schedule and, from the cron, surface as an
+    // unhandled rejection.
+    const { job, calls } = buildJob({
+      schedules: [makeSchedule({ _id: "broken", endDate: "not-a-date" }), makeSchedule()],
+    });
+
+    await job.run(now);
+
+    assert.lengthOf(calls.sms, 1);
   });
 
   it("skips a schedule whose window has closed", async () => {

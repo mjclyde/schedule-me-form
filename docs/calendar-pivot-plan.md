@@ -165,7 +165,7 @@ us every query the app needs without a database:
 | Need | Query |
 | --- | --- |
 | This person's bookings | `privateExtendedProperty=[app=schedule-me, personId=<id>]` |
-| Reminders due | `privateExtendedProperty=app=schedule-me`, `timeMin=now`, `timeMax=now+~24h`, filter where `reminderSentAt` is absent |
+| Reminders due | `privateExtendedProperty=app=schedule-me`, `timeMin=now`, `timeMax=end of tomorrow`, filter where `reminderSentAt` is absent |
 | Verify a booking on cancel | `events.get(eventId)`, check `private.personId` matches the OTP holder |
 
 Limits are not a concern: 1024 chars per value, 32 KB per event.
@@ -417,6 +417,14 @@ Items 1–3, 7 and 9 are **fixed** in Phase 1.
    would have fired on the first busy calendar queried over a multi-month range, which is
    exactly what this pivot introduces. Fixed.
 
+11. **`POST /Schedules/:id/CreateOTP` is unauthenticated and unthrottled.** It has to be —
+   it is how someone with no session asks for their manage link — but that means anyone who
+   knows a customer's number can make us text them repeatedly. Phase 4 removed the worse
+   half of this: the endpoint now reuses a live OTP instead of rotating one, so repeated
+   calls can no longer churn someone's access token and invalidate the links they hold.
+   The SMS flood remains, and wants per-phone/per-IP rate limiting. Inherited from
+   `/Events/:id/CreateOTP`, but Phase 4 makes this the primary path.
+
 ---
 
 ## 9. Phasing
@@ -505,9 +513,13 @@ curl "$API/Schedules/2026spring/Availability?from=2026-03-01&to=2026-03-31"
 - The OTP manage link is back in the confirmation SMS. An OTP now scopes to a
   `scheduleId` rather than an `eventId`; both fields live on the sub-document until
   Phase 5 removes the slot-era pages that read `eventId`.
-- Reminder cron rewritten off the calendar: it lists each schedule's own bookings in the
-  next 24 hours, skips the ones already stamped, texts the rest, and patches
-  `reminderSentAt` onto the event. `findRemindersDue` / `reminderHasBeenSent` deleted.
+- Reminder cron rewritten off the calendar: it lists each schedule's own bookings between
+  now and the **end of tomorrow**, skips the ones already stamped, texts the rest, and
+  patches `reminderSentAt` onto the event. `findRemindersDue` / `reminderHasBeenSent`
+  deleted. The window is not a rolling 24 hours: the cron only runs 12:00–18:00, so a
+  rolling window never reaches tomorrow evening, and a 19:00 appointment would first be
+  seen at noon on the day itself — ~7 hours' notice, in a text reading "on \<today\>".
+  The Mongo query this replaced reached the end of tomorrow for the same reason.
 - `MyEvents.vue` moved onto bookings, with `store/bookings.ts` and `BookingCard.vue`.
   `MainHeader.vue` moved off `store/event.ts` — it had been rendering blank since the
   Phase 3 cutover, because it read a store populated from `?eventId=`.

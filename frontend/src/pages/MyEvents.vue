@@ -51,9 +51,8 @@
         <ArrowUpIcon class="h-5 inline-block" />
         Tap an appointment to add it to your Calendar
       </div>
-      <div v-if="bookings.upcoming.length" class="mb-10 text-center text-xs text-gray-400">
-        Times shown in your local time. Appointments are in
-        {{ bookings.upcoming[0].timeZone }}.
+      <div v-if="sharedTimeZone" class="mb-10 text-center text-xs text-gray-400">
+        Times shown in your local time. Appointments are in {{ sharedTimeZone }}.
       </div>
 
       <div v-if="bookings.past.length" class="list-label">Past Appointments</div>
@@ -120,6 +119,17 @@ const showingCalendarAlert = ref(false);
 const bookingQuery = computed(() =>
   schedule.scheduleId ? { scheduleId: schedule.scheduleId } : {},
 );
+
+/**
+ * The zone to caption the list with, or '' when there isn't one.
+ *
+ * /MyBookings is person-scoped across every schedule, so two bookings can sit
+ * in different zones. Naming one of them would be wrong for the others.
+ */
+const sharedTimeZone = computed(() => {
+  const zones = new Set(bookings.upcoming.map((b) => b.timeZone));
+  return zones.size === 1 ? [...zones][0] : '';
+});
 
 if (session.person?._id) {
   bookings.fetchBookings();

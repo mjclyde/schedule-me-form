@@ -37,6 +37,10 @@ interface HarnessOptions {
   schedule?: Schedule | null;
   /** Phones that already belong to a person. Anything else is unknown. */
   known?: string[];
+  /** An existing person returned by findByPhone, if the phone is known. */
+  existing?: Person;
+  /** Simulates Twilio being down. */
+  smsFails?: boolean;
 }
 
 function buildApi(options: HarnessOptions = {}) {
@@ -50,14 +54,20 @@ function buildApi(options: HarnessOptions = {}) {
   const api = new SchedulesAPI({ find: () => ({}) } as any);
   (api as any).schedules = { findById: async () => schedule };
   (api as any).persons = {
+    findByPhone: async (phone: string) =>
+      known.includes(phone) ? (options.existing ?? makePerson({ phone } as any)) : null,
     createOTP: async (phone: string, scope: { scheduleId?: string }) => {
       calls.otpsCreated.push({ phone, scheduleId: scope.scheduleId });
-      // Mongo's findOneAndUpdate matches nothing for a phone we've never seen.
-      return known.includes(phone) ? makePerson({ phone } as any) : null;
+      return known.includes(phone) ? makePerson({ phone, otp: { value: "fresh1", expiresAt: new Date(Date.now() + 60_000), scheduleId: scope.scheduleId } } as any) : null;
     },
   };
   (api as any).notifications = {
-    send: async (n: any) => calls.sms.push({ phone: n.phone, message: n.message }),
+    send: async (n: any) => {
+      if (options.smsFails) {
+        throw new Error("twilio is down");
+      }
+      calls.sms.push({ phone: n.phone, message: n.message });
+    },
   };
 
   return { api, calls };
@@ -97,8 +107,12 @@ describe("POST /Schedules/:id/CreateOTP", () => {
     assert.include(calls.sms[0].message, "abc123");
   });
 
-  it("scopes the OTP to the schedule, not to an event", async () => {
-    const { api, calls } = buildApi();
+  it("scopes a newly minted OTP to the schedule, not to an event", async () => {
+    const { api, calls } = buildApi({
+      existing: makePerson({
+        otp: { value: "expired", expiresAt: new Date(Date.now() - 60_000) },
+      } as any),
+    });
 
     await api.createOTP(
       { params: { id: "2026spring" }, body: { phone: "(555) 555-0123" } } as any,
@@ -123,6 +137,63 @@ describe("POST /Schedules/:id/CreateOTP", () => {
 
     assert.equal(res.code, 204);
     assert.isEmpty(calls.sms);
+  });
+
+  it("reuses a live OTP rather than rotating it", async () => {
+    // createOTP $sets a whole new otp sub-document, so minting one here would
+    // kill the link in every text the person has already received — including
+    // a schedule owner's Google-linking OTP.
+    const { api, calls } = buildApi({
+      existing: makePerson({
+        otp: {
+          value: "older1",
+          expiresAt: new Date(Date.now() + 60_000),
+          scheduleId: "some-other-schedule",
+        },
+      } as any),
+    });
+
+    await api.createOTP(
+      { params: { id: "2026spring" }, body: { phone: "(555) 555-0123" } } as any,
+      fakeRes() as any,
+    );
+
+    assert.isEmpty(calls.otpsCreated, "must not rotate a live OTP");
+    assert.include(calls.sms[0].message, "older1");
+  });
+
+  it("mints a new OTP when the existing one has expired", async () => {
+    const { api, calls } = buildApi({
+      existing: makePerson({
+        otp: {
+          value: "expired",
+          expiresAt: new Date(Date.now() - 60_000),
+          scheduleId: "2026spring",
+        },
+      } as any),
+    });
+
+    await api.createOTP(
+      { params: { id: "2026spring" }, body: { phone: "(555) 555-0123" } } as any,
+      fakeRes() as any,
+    );
+
+    assert.lengthOf(calls.otpsCreated, 1);
+    assert.include(calls.sms[0].message, "fresh1");
+  });
+
+  it("still reports success when the text cannot be sent", async () => {
+    // A 500 here would both break the uniform answer that keeps this from
+    // being a customer oracle, and report failure for an OTP that is live.
+    const { api } = buildApi({ smsFails: true });
+    const res = fakeRes();
+
+    await api.createOTP(
+      { params: { id: "2026spring" }, body: { phone: "(555) 555-0123" } } as any,
+      res as any,
+    );
+
+    assert.equal(res.code, 204);
   });
 
   it("rejects a request with no phone number", async () => {

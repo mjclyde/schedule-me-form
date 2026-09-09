@@ -10,14 +10,27 @@ import { BookingEventLike } from "./google/bookingView";
 import { BookingWindowConfig, getOpenState, Schedule } from "./models/schedule";
 import { appointmentReminder } from "./utils/bookingMessages";
 
-/** How far ahead a sweep looks. Paired with an hourly cron, not a daily one. */
-const REMINDER_LEAD_HOURS = 24;
+/**
+ * How far ahead a sweep looks: through the end of the following day, not a
+ * rolling 24 hours.
+ *
+ * The cron only runs 12:00-18:00, so a rolling window never reaches tomorrow
+ * evening — an appointment at 19:00 tomorrow would first be seen at noon on
+ * the day itself, giving ~7 hours' notice and a text reading "on <today>".
+ * The Mongo query this replaced reached the end of tomorrow for the same
+ * reason. Already-reminded bookings are skipped, so a wider window costs
+ * nothing but the one extra day of events to filter.
+ */
+export function reminderWindowEnd(now: DateTime) {
+  return now.plus({ days: 1 }).endOf("day");
+}
 
 /**
- * The 24-hour reminder sweep, run off the calendar rather than Mongo.
+ * The day-before reminder sweep, run off the calendar rather than Mongo.
  *
- * Each sweep asks Google for this schedule's own bookings starting in the next
- * day, skips the ones already stamped, texts the rest, and stamps them. The
+ * Each sweep asks Google for this schedule's own bookings starting between now
+ * and the end of tomorrow, skips the ones already stamped, texts the rest, and
+ * stamps them. The
  * stamp lives in `extendedProperties.private.reminderSentAt` on the event
  * itself, so there is no reminder state anywhere else to drift out of sync.
  */
@@ -36,14 +49,18 @@ export class Reminders {
 
   async run(now: DateTime = DateTime.now()) {
     for (const schedule of await this.schedules.find()) {
-      const localNow = now.setZone(schedule.timeZone);
-      if (!shouldSweep(schedule, localNow)) {
-        continue;
+      // The whole per-schedule step is guarded, not just the sweep: a
+      // malformed startDate/endDate makes getOpenState throw, and one bad row
+      // must not skip every remaining schedule — nor, from the cron, escape
+      // as an unhandled rejection.
+      try {
+        const localNow = now.setZone(schedule.timeZone);
+        if (shouldSweep(schedule, localNow)) {
+          await this.sweep(schedule, localNow);
+        }
+      } catch (err) {
+        console.error(`Reminder sweep failed for ${schedule._id}: ${err}`);
       }
-      // One unreachable calendar must not stop the other schedules' reminders.
-      await this.sweep(schedule, localNow).catch((err) =>
-        console.error(`Reminder sweep failed for ${schedule._id}: ${err}`),
-      );
     }
   }
 
@@ -54,7 +71,7 @@ export class Reminders {
     const events = await calendar.listAppEvents({
       calendarId: schedule.calendarId,
       timeMin: now.toJSDate(),
-      timeMax: now.plus({ hours: REMINDER_LEAD_HOURS }).toJSDate(),
+      timeMax: reminderWindowEnd(now).toJSDate(),
       // Two schedules can share a calendar; only remind for this one's.
       filters: { scheduleId: schedule._id },
     });

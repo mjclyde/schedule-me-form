@@ -63,7 +63,10 @@ export class App {
       // Every active schedule, rather than two hardcoded event ids (bug #5).
       // The sweep skips schedules whose window has closed, so a finished
       // campaign costs nothing.
-      onTick: () => new Reminders(this.injector).run(),
+      onTick: () =>
+        new Reminders(this.injector)
+          .run()
+          .catch((err) => console.error(`Reminder sweep failed: ${err}`)),
       start: false,
       timeZone: "America/Denver",
     });
