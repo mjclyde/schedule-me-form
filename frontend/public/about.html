@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedule Me — Appointment Booking</title>
+<meta name="description" content="Schedule Me is a small self-hosted tool for booking short appointments against an organizer's Google Calendar.">
+<link rel="stylesheet" href="/_doc.css">
+</head>
+<body>
+
+<h1>Schedule Me</h1>
+<p class="meta">A small self-hosted appointment booking tool</p>
+
+<p>Schedule Me lets an organizer offer short appointments from their own
+calendar, and lets people book one from a public page without creating an
+account.</p>
+
+<h2>How it works</h2>
+<ul>
+  <li>The organizer connects their Google Calendar and marks the times they are
+      willing to meet as available.</li>
+  <li>The booking page shows those open times, worked out from the calendar
+      itself — there is no separate list of slots to keep in sync.</li>
+  <li>Someone picks a time and enters their name and mobile number. No account,
+      no password.</li>
+  <li>The appointment is written to the organizer's calendar, and the person
+      booking gets a text confirming it.</li>
+  <li>A reminder goes out the day before. Either side can cancel, and the other
+      is notified by text.</li>
+</ul>
+
+<h2>Signing in</h2>
+<p>To see or cancel an appointment, request a one-time code from the booking
+page. It is texted to the number on the booking. There are no passwords.</p>
+
+<h2>What it accesses</h2>
+<p>The application reads the organizer's connected Google Calendar to determine
+which times are free, and creates or removes events on it for bookings. It reads
+only whether time is busy or free — never the contents of other calendar
+entries. People booking appointments do not sign in with Google and none of
+their Google data is involved. This is set out in full in the
+<a href="/privacy.html">Privacy Policy</a>.</p>
+
+<h2>Book an appointment</h2>
+<p>If you were sent a booking link, open it to see the available times. The
+booking page is at <a href="/">this site's home page</a>.</p>
+
+<hr>
+<footer>
+  <a href="/privacy.html">Privacy Policy</a> &middot;
+  <a href="/terms.html">Terms of Service</a> &middot;
+  <a href="/">Booking page</a>
+</footer>
+
+</body>
+</html>
