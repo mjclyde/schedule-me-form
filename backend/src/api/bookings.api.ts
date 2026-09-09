@@ -26,6 +26,7 @@ import {
   ownerCancellationNotice,
 } from "../utils/bookingMessages";
 import { CreateOTPLink } from "../utils/otpLink";
+import { CreateICS } from "../utils/createICS";
 import { BadRequestError } from "../errors";
 
 /** A loose check: the authority on deliverability is Google's own invite. */
@@ -158,15 +159,79 @@ export class BookingsAPI {
 
   @API("delete", "/Bookings/:id", UseOTPAuth())
   async cancel(req: AuthorizedRequest, res: Response) {
-    // A Google event id does not name the calendar holding it, so the caller
-    // has to say which schedule the booking belongs to.
+    const found = await this.findOwnBooking(req);
+    if (!found) {
+      return res.sendStatus(404);
+    }
+    if (found === "no-schedule") {
+      return res.status(400).send("`scheduleId` is required");
+    }
+    const { schedule, booking, calendar } = found;
+
+    await calendar.deleteEvent(schedule.calendarId, booking.id, {
+      sendUpdates: "all",
+    });
+    // Deleting the opaque event is what frees the slot; dropping the cache is
+    // what makes availability say so before the TTL expires.
+    this.availability.invalidate(schedule);
+
+    await this.notifyCancelled(schedule, req.person, booking);
+    res.sendStatus(204);
+  }
+
+  /**
+   * The booking as a downloadable .ics, for someone who booked by phone and
+   * so never received a Google invite.
+   *
+   * Behind OTP auth rather than public: the caller already holds the OTP on
+   * the page this is reached from, so requiring it costs nothing and stops a
+   * guessed event id from returning an appointment's title and time.
+   */
+  @API("get", "/Bookings/:id/CalendarEvent", UseOTPAuth())
+  async calendarEvent(req: AuthorizedRequest, res: Response) {
+    const found = await this.findOwnBooking(req);
+    if (!found) {
+      return res.sendStatus(404);
+    }
+    if (found === "no-schedule") {
+      return res.status(400).send("`scheduleId` is required");
+    }
+
+    const { schedule, booking } = found;
+    const filename = `${schedule.type.replace(/\s+/g, "-")}.ics`;
+    // Built in memory and sent. The slot-era endpoint wrote the file into the
+    // process CWD and unlinked it after the download, which raced between
+    // concurrent requests and leaked the file whenever one failed (bug #6).
+    res
+      .set("Content-Type", "text/calendar; charset=utf-8")
+      .set("Content-Disposition", `attachment; filename="${filename}"`)
+      .send(
+        CreateICS({
+          id: booking.id,
+          title: schedule.type,
+          start: new Date(booking.startAt),
+          end: new Date(booking.endAt),
+          description: schedule.name,
+        }),
+      );
+  }
+
+  /**
+   * Resolves `:id` + `?scheduleId=` to a booking the caller actually owns.
+   *
+   * @returns the booking, `"no-schedule"` when the request named no schedule,
+   *   or null for anything the caller may not see — one answer for "no such
+   *   event", "not a booking of ours" and "not yours", so that an OTP holder
+   *   cannot probe the owner's calendar for which ids exist.
+   */
+  private async findOwnBooking(req: AuthorizedRequest) {
     const scheduleId = req.query.scheduleId;
     if (typeof scheduleId !== "string" || !scheduleId) {
-      return res.status(400).send("`scheduleId` is required");
+      return "no-schedule" as const;
     }
     const schedule = await this.schedules.findById(scheduleId);
     if (!schedule) {
-      return res.sendStatus(404);
+      return null;
     }
 
     const calendar = await this.calendarManager.getCalendar(
@@ -175,25 +240,12 @@ export class BookingsAPI {
     const event = await calendar
       .getEvent(schedule.calendarId, req.params.id)
       .catch(() => null);
-
-    // One 404 for "no such event", "not a booking of ours" and "not yours".
-    // Distinguishing them would let an OTP holder probe the owner's calendar.
     if (!event || !ownsBooking(event, req.person._id)) {
-      return res.sendStatus(404);
+      return null;
     }
+
     const booking = toMyBooking(event, schedule);
-
-    await calendar.deleteEvent(schedule.calendarId, req.params.id, {
-      sendUpdates: "all",
-    });
-    // Deleting the opaque event is what frees the slot; dropping the cache is
-    // what makes availability say so before the TTL expires.
-    this.availability.invalidate(schedule);
-
-    if (booking) {
-      await this.notifyCancelled(schedule, req.person, booking);
-    }
-    res.sendStatus(204);
+    return booking ? { schedule, booking, calendar } : null;
   }
 
   /**

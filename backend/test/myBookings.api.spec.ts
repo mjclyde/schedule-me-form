@@ -105,7 +105,12 @@ function buildApi(options: HarnessOptions = {}) {
 function fakeRes() {
   return {
     body: undefined as any,
+    headers: {} as { [key: string]: string },
     code: 200,
+    set(field: string, value: string) {
+      this.headers[field] = value;
+      return this;
+    },
     send(body: any) {
       this.body = body;
       return this;
@@ -363,5 +368,61 @@ describe("DELETE /Bookings/:id", () => {
 
     assert.equal(res.code, 400);
     assert.isEmpty(calls.deleted);
+  });
+});
+
+describe("GET /Bookings/:id/CalendarEvent", () => {
+  const events = { "owner@example.com": [bookingEvent()] };
+
+  it("returns an .ics for the caller's own booking", async () => {
+    const { api } = buildApi({ events });
+    const res = fakeRes();
+
+    await api.calendarEvent(
+      authed({ params: { id: "evt1" }, query: { scheduleId: "2026spring" } }),
+      res as any,
+    );
+
+    assert.equal(res.code, 200);
+    assert.include(res.body, "BEGIN:VCALENDAR");
+    assert.include(res.body, "SUMMARY:Tune-Up");
+    assert.include(res.headers["Content-Type"], "text/calendar");
+  });
+
+  it("names the download so it does not arrive as a random id", async () => {
+    const { api } = buildApi({ events });
+    const res = fakeRes();
+
+    await api.calendarEvent(
+      authed({ params: { id: "evt1" }, query: { scheduleId: "2026spring" } }),
+      res as any,
+    );
+
+    assert.include(res.headers["Content-Disposition"], "Tune-Up.ics");
+  });
+
+  it("refuses a booking belonging to someone else", async () => {
+    const { api } = buildApi({
+      events: {
+        "owner@example.com": [bookingEvent({ tags: { personId: "someone-else" } })],
+      },
+    });
+    const res = fakeRes();
+
+    await api.calendarEvent(
+      authed({ params: { id: "evt1" }, query: { scheduleId: "2026spring" } }),
+      res as any,
+    );
+
+    assert.equal(res.code, 404);
+  });
+
+  it("rejects a request that does not say which schedule", async () => {
+    const { api } = buildApi({ events });
+    const res = fakeRes();
+
+    await api.calendarEvent(authed({ params: { id: "evt1" } }), res as any);
+
+    assert.equal(res.code, 400);
   });
 });
