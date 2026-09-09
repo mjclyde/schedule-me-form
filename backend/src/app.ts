@@ -19,7 +19,7 @@ import { SlotService } from "./services/slot.service";
 import { SlotAPI } from "./api/slots.api";
 import { PersonService } from "./services/person.service";
 import { NotificationService } from "./services/notification.service";
-import { ProcessReminders } from "./reminders";
+import { Reminders } from "./reminders";
 import { CronJob } from "cron";
 import { PersonsAPI } from "./api/persons.api";
 import { SetOTPAuthInjector } from "./middleware/otpAuthorization";
@@ -60,10 +60,10 @@ export class App {
     this.injector = new Injector();
     this.remindersCronJob = CronJob.from({
       cronTime: "0 12-18 * * *",
-      onTick: async () => {
-        await ProcessReminders(this.injector, "2025tdfa");
-        await ProcessReminders(this.injector, "2025tdnl4");
-      },
+      // Every active schedule, rather than two hardcoded event ids (bug #5).
+      // The sweep skips schedules whose window has closed, so a finished
+      // campaign costs nothing.
+      onTick: () => new Reminders(this.injector).run(),
       start: false,
       timeZone: "America/Denver",
     });

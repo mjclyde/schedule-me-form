@@ -62,3 +62,24 @@ export function ownerCancellationNotice(info: BookingMessageInfo) {
     `${info.personName} has cancelled ${info.scheduleType} on ${date} at ${time}.`
   );
 }
+
+export function appointmentReminder(
+  info: BookingMessageInfo & { now: DateTime },
+) {
+  const { date, time } = formatAppointment(info.startAt, info.timeZone);
+  // "tomorrow" is judged in the schedule's zone, so a late-evening
+  // appointment does not read as the wrong day to whoever is reading it.
+  const when = isNextDay(info.startAt, info.now, info.timeZone)
+    ? `tomorrow (${date})`
+    : `on ${date}`;
+  return (
+    `Hello ${info.personName}. This is a reminder about your ` +
+    `${info.scheduleType} appointment ${when} at ${time}. ` +
+    `We look forward to seeing you there!`
+  );
+}
+
+function isNextDay(startAt: DateTime, now: DateTime, timeZone: string) {
+  const day = startAt.setZone(timeZone).startOf("day");
+  return day.equals(now.setZone(timeZone).startOf("day").plus({ days: 1 }));
+}
