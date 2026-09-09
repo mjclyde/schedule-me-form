@@ -40,3 +40,18 @@ export function ownerBookingNotice(
     `${info.personName} has signed up for ${info.scheduleType} on ${date} at ${time}.`
   );
 }
+
+export function bookingCancellation(info: BookingMessageInfo) {
+  const { date, time } = formatAppointment(info.startAt, info.timeZone);
+  return (
+    `Hello ${info.personName}. Your ${info.scheduleType} appointment on ` +
+    `${date} at ${time} has been cancelled.`
+  );
+}
+
+export function ownerCancellationNotice(info: BookingMessageInfo) {
+  const { date, time } = formatAppointment(info.startAt, info.timeZone);
+  return (
+    `${info.personName} has cancelled ${info.scheduleType} on ${date} at ${time}.`
+  );
+}
