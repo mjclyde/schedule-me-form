@@ -1,6 +1,6 @@
 # Architecture Pivot: Google Calendar as the Source of Truth
 
-Status: **Phases 1–4 complete**; Phase 5 not yet started
+Status: **Complete** — all five phases done
 Branch: `claude/google-calendar-integration-arch-sefqo2`
 
 ## Goal
@@ -382,9 +382,10 @@ Items 1–3, 7 and 9 are **fixed** in Phase 1.
 3. ~~**`OAuthClientManager` caches an `OAuth2Client` per person forever**~~ and never persisted
    refreshed access tokens. Fixed with a `tokens` listener that writes them back, plus an
    `evict()` for re-link/revoke.
-4. **`slot.service.ts findAvailable`** — `{ $lt: [{ $size: "$persons" }, "$capacity.max"] }`
+4. ~~**`slot.service.ts findAvailable`** — `{ $lt: [{ $size: "$persons" }, "$capacity.max"] }`
    evaluates false when `capacity.max` is absent, so any slot without an explicit max is
-   never bookable. Moot after the pivot, but it explains any "slot never appeared" reports.
+   never bookable.~~ Never fixed, and now unfixable: the service was deleted in Phase 5.
+   Left here because it explains any "slot never appeared" reports from before the pivot.
 5. ~~**`app.ts` hardcodes `2025tdfa` / `2025tdnl4`** in the reminder cron.~~ Fixed in
    Phase 4: the sweep walks active schedules and skips any whose window has closed, so a
    finished campaign costs no Google call. The cutoff is `endDate + 1 day`, not `endDate` —
@@ -394,13 +395,14 @@ Items 1–3, 7 and 9 are **fixed** in Phase 1.
 6. ~~**`slots.api.ts` `.ics` handling** writes the file into the process CWD and unlinks
    after download — racy and leaks on failed downloads.~~ The replacement,
    `GET /Bookings/:id/CalendarEvent`, builds the string in memory and `res.send`s it. The
-   slot-era route itself dies with the slot code in Phase 5.
+   slot-era route was deleted with the rest of the slot code in Phase 5.
 7. ~~**`backend/test/index.spec.ts` imports `Thing` from `../src/index`, which does not exist**~~ —
    the suite could not compile, so `npm test` was dead. Removed; real specs took its place.
-8. Hardcoded `America/Denver` in `utils/formatTime.ts`, ~~`reminders.ts`~~, and
-   `slots.api.ts` message builders. `reminders.ts` was rewritten in Phase 4 and now formats
-   in the schedule's own `timeZone`. The remaining two are in the slot path and die with it
-   in Phase 5.
+8. ~~Hardcoded `America/Denver` in `utils/formatTime.ts`, `reminders.ts`, and
+   `slots.api.ts` message builders.~~ `reminders.ts` was rewritten in Phase 4 and formats in
+   the schedule's own `timeZone`; the other two were deleted in Phase 5. The one
+   `America/Denver` still in the tree is the cron's `timeZone` in `app.ts`, which decides
+   *when the sweep runs* rather than how any time is rendered — that one is intentional.
 10. ~~**`PersonService.createOTP` does not upsert**, and persons are only ever created by
    booking, so `POST /Events/:id/CreateOTP` returned 500 for a phone number that had never
    signed up (the "Find My Events" form's likely failure mode).~~ Fixed in Phase 4:
@@ -422,8 +424,9 @@ Items 1–3, 7 and 9 are **fixed** in Phase 1.
    knows a customer's number can make us text them repeatedly. Phase 4 removed the worse
    half of this: the endpoint now reuses a live OTP instead of rotating one, so repeated
    calls can no longer churn someone's access token and invalidate the links they hold.
-   The SMS flood remains, and wants per-phone/per-IP rate limiting. Inherited from
-   `/Events/:id/CreateOTP`, but Phase 4 makes this the primary path.
+   The SMS flood remains, and wants per-phone/per-IP rate limiting. **This is the one
+   open bug in the list.** Inherited from `/Events/:id/CreateOTP`; since Phase 5 deleted
+   that route, this is now the only path.
 
 ---
 
@@ -441,7 +444,7 @@ Each phase is independently shippable and leaves the app working.
   tests across the three new modules covering DST in both directions, all-day-Free exclusion,
   buffers, min-notice, alignment, window merging, and state tampering/expiry.
 
-**Linking a calendar now** (there is still no UI — Phase 5's admin page is the fix):
+**Linking a calendar now** (there is still no UI; an admin page is separate work — §10):
 
 ```sh
 curl -H "Authorization: <otp>" $API/Google/AuthUrl   # -> {"url": "https://accounts.google.com/..."}
@@ -511,8 +514,8 @@ curl "$API/Schedules/2026spring/Availability?from=2026-03-01&to=2026-03-31"
 - `GET /MyBookings` and `DELETE /Bookings/:id`, plus `GET /Bookings/:id/CalendarEvent`
   (the `.ics` fallback) and `GET /Schedule`. See §6 for why they take a `scheduleId`.
 - The OTP manage link is back in the confirmation SMS. An OTP now scopes to a
-  `scheduleId` rather than an `eventId`; both fields live on the sub-document until
-  Phase 5 removes the slot-era pages that read `eventId`.
+  `scheduleId` rather than an `eventId`; both fields lived on the sub-document until
+  Phase 5 dropped `eventId`.
 - Reminder cron rewritten off the calendar: it lists each schedule's own bookings between
   now and the **end of tomorrow**, skips the ones already stamped, texts the rest, and
   patches `reminderSentAt` onto the event. `findRemindersDue` / `reminderHasBeenSent`
@@ -535,16 +538,28 @@ sweep retries — self-limiting, because the booking leaves the 24-hour window o
 passes. A booking whose person has been deleted *is* stamped, since that will not fix
 itself and would otherwise be retried every hour.
 
-**Phase 5 — Teardown**
-- Delete `Slot` model/service/API and `common/slot.ts`, plus `EventService` / `EventAPI`
-  and `common/event.ts`.
-- Frontend: `store/slots.ts`, `store/event.ts` and `MySlot.vue` now reference only each
-  other and have no live consumer — delete them.
-- Drop `otp.eventId` from the person sub-document once nothing reads it.
-- Drop the `slots` and `events` collections.
-- Remaining hardcoded `America/Denver` in `utils/formatTime.ts` and `slots.api.ts`
-  goes with the slot code (bug #8).
-- README/setup notes: how to mark a window Free, how to link the calendar.
+**Phase 5 — Teardown** ✅ *done*
+- Deleted, 12 files in all: `Slot` and `Event` models, `SlotService` /
+  `EventService`, `SlotAPI` / `EventAPI`, `common/slot.ts`, `common/event.ts`,
+  `utils/formatTime.ts`, and the frontend's `store/slots.ts`, `store/event.ts`
+  and `MySlot.vue`. `app.ts` registers three services and three APIs now.
+- `otp.eventId` is gone from `PersonModel` and `OTPScope`. Slot-era person
+  documents still deserialize — the field is simply not declared, and every
+  endpoint reading the OTP treats a missing `scheduleId` as "not found", which
+  `scheduleOtp.api.spec.ts` pins.
+- `npm run drop-slot-data` retires the `slots` and `events` collections and
+  `$unset`s `otp.eventId`. It is a **dry run unless passed `--confirm`**, since
+  there is no migration (§2 took the decision to drop the old data outright)
+  and the operator should get to confirm which database they are pointed at.
+  It deliberately leaves `otp.value` alone: the OTP is the login, so retiring a
+  scope must not invalidate a manage link already sitting in someone's texts.
+- Bug #8 is fully closed — the last hardcoded `America/Denver` in message copy
+  went with `slots.api.ts`. The one that remains is the cron's own `timeZone`,
+  which sets *when the sweep runs*, not how any time is rendered.
+- **`README.md`** now exists: what makes a window bookable, the all-day-Free
+  rule, the three-step calendar link, the script table, and the API surface
+  with its two public-boundary notes.
+- 167 tests, unchanged — nothing deleted in this phase had any.
 
 ---
 

@@ -1,8 +1,8 @@
 # Testing the calendar pivot locally
 
 A walkthrough for booking a real appointment against a real Google calendar,
-end to end, and then managing it. Everything here is Phases 1–4; see
-`calendar-pivot-plan.md` for what is still missing.
+end to end, and then managing it. See `README.md` for setup and the concepts,
+and `calendar-pivot-plan.md` for the architecture and what is still missing.
 
 ## 0. Prerequisites
 
@@ -204,8 +204,9 @@ or by opening the event in Google Calendar (the stamp is not shown in the UI;
 ## Known gaps at this point
 
 - **No admin UI.** Schedules are seeded by the CLI above.
-- **The slot-era pages and endpoints are still present** but nothing links to
-  them. Phase 5 deletes them.
+- **Slot-era code is gone** (Phase 5). If you are testing against a database
+  that predates the pivot, `npm run drop-slot-data` reports what is left of it
+  and, with `--confirm`, removes it.
 - Editing or deleting a booking directly in Google Calendar changes app state
   silently — no cancellation SMS. That is an accepted cost of the
   calendar-as-database design; see §4 of the plan.
