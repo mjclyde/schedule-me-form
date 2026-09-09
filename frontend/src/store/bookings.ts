@@ -4,6 +4,7 @@ import { useAPI } from "./fetch";
 import { useSession } from "./session";
 import { MyBooking } from "../../common/booking";
 import { MonthNames } from "./availability";
+import { formatTimeOfDay } from "../utils/formatTime";
 
 /**
  * A booking with the strings the list needs, parsed once.
@@ -92,9 +93,7 @@ function format(booking: MyBooking): FormattedBooking {
     start,
     end,
     dayStr: `${MonthNames[start.getMonth()].substring(0, 3)}. ${start.getDate()}`,
-    timeStr: start
-      .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-      .replace(/:\d{2}\s/, " "),
+    timeStr: formatTimeOfDay(start),
     // Past once it has finished, not once it has started: someone mid-
     // appointment should not see it drop into the history list.
     isPast: end < new Date(),

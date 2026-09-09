@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useAPI } from "./fetch";
 import { useSchedule } from "./schedule";
 import { AvailabilityResponse, AvailableSlot } from "../../common/schedule";
+import { formatTimeOfDay } from "../utils/formatTime";
 
 export interface Slot extends AvailableSlot {
   /** Parsed once, in the visitor's own zone — the calendar grid is local. */
@@ -60,7 +61,7 @@ export const useAvailability = defineStore("availability", () => {
   const slots = computed<Slot[]>(() =>
     (response.value?.slots || []).map((s) => {
       const start = new Date(s.startAt);
-      return { ...s, start, timeStr: formatTime(start) };
+      return { ...s, start, timeStr: formatTimeOfDay(start) };
     }),
   );
 
@@ -237,12 +238,6 @@ function toDateParam(date: Date) {
 
 function formatDateStr(day: Date) {
   return `${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`;
-}
-
-function formatTime(date: Date) {
-  return date
-    .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    .replace(/\:\d{2}\s/, " ");
 }
 
 function pad(value: number) {
