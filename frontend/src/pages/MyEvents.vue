@@ -1,71 +1,90 @@
 <template>
   <div class="max-w-xl mx-auto px-8">
     <div v-if="!session.person && otpRequestStatus !== 'SUCCESS' && otpRequestStatus !== 'ERROR'">
-      <div class="text-gray-400 italic text-center mt-8 mb-3">
-        To manage your events, enter your phone number below.
+      <div v-if="!schedule.scheduleId" class="my-8">
+        <Alert type="ERROR" title="No schedule selected">
+          This link is missing a schedule. Please use the link you were given.
+        </Alert>
       </div>
-      <ContactForm :phone-only="true" v-model:phone="phone" />
-      <Button :disabled="!canSubmit" @click="findMyEvents"
-        class="w-full mt-6 relative flex justify-center items-center">
-        Find My Events
-        <div v-if="otpRequestStatus === 'IN_PROGRESS'"
-          class="absolute animate-spin right-3 w-6 h-6 border-4 border-sky-700 border-t-white rounded-full"></div>
-      </Button>
-      <div class="text-gray-400 italic text-center mt-8 mb-3">
-        You will receive a text message with access to your events.
-      </div>
+      <template v-else>
+        <div class="text-gray-400 italic text-center mt-8 mb-3">
+          To manage your appointments, enter your phone number below.
+        </div>
+        <ContactForm :phone-only="true" v-model:phone="phone" />
+        <Button :disabled="!canSubmit" @click="findMyBookings"
+          class="w-full mt-6 relative flex justify-center items-center">
+          Find My Appointments
+          <div v-if="otpRequestStatus === 'IN_PROGRESS'"
+            class="absolute animate-spin right-3 w-6 h-6 border-4 border-sky-700 border-t-white rounded-full"></div>
+        </Button>
+        <div class="text-gray-400 italic text-center mt-8 mb-3">
+          You will receive a text message with access to your appointments.
+        </div>
+      </template>
     </div>
+
     <div v-if="otpRequestStatus === 'SUCCESS' || otpRequestStatus === 'ERROR'" class="max-w-xl mx-auto my-8">
       <Alert v-if="otpRequestStatus === 'SUCCESS'" type="SUCCESS" title="Check Your Messages">
-        We have sent a link to the phone number you provided. Click that link to view your events.
+        If that number has an appointment with us, we have sent it a link.
+        Click that link to view your appointments.
       </Alert>
-      <Alert v-if="otpRequestStatus === 'ERROR'" class="mt-6 " type="ERROR" title="Oops">
-        It looks like we had a problem sending a link to the phone number your provided. Please try again later.
+      <Alert v-if="otpRequestStatus === 'ERROR'" class="mt-6" type="ERROR" title="Oops">
+        It looks like we had a problem sending a link to the phone number you provided.
+        Please try again later.
       </Alert>
     </div>
+
     <div class="mt-8" v-if="session.person?._id">
-      <div class="list-label">
-        Upcoming Events
+      <div class="list-label">Upcoming Appointments</div>
+      <div v-if="bookings.isFetching && !bookings.bookings.length" class="py-4 text-gray-400 italic">
+        Loading your appointments&hellip;
       </div>
-      <div v-if="!futureSlots.length" class="py-4 text-gray-400 italic">
-        You have no upcoming events yet.
-        <RouterLink class="underline" to="/">Click here to Sign Up.</RouterLink>
+      <div v-else-if="!bookings.upcoming.length" class="py-4 text-gray-400 italic">
+        You have no upcoming appointments yet.
+        <RouterLink class="underline" :to="{ name: 'booking', query: bookingQuery }">
+          Click here to book one.
+        </RouterLink>
       </div>
-      <MySlot v-for="s of futureSlots" :slot="s" :key="s._id" @delete="deleteSlot" @click="slotClicked" />
-      <div v-if="futureSlots.length" class="mb-10 mt-6 text-sm font-medium text-gray-400 italic text-center">
+      <BookingCard v-for="b of bookings.upcoming" :booking="b" :key="b.id" @cancel="confirmCancel"
+        @click="offerCalendarEvent" />
+      <div v-if="bookings.upcoming.length" class="mb-4 mt-6 text-sm font-medium text-gray-400 italic text-center">
         <ArrowUpIcon class="h-5 inline-block" />
-        Tap an event to add it to your Calendar
+        Tap an appointment to add it to your Calendar
       </div>
-      <div v-if="pastSlots.length" class="list-label">Past Events</div>
-      <MySlot v-for="s of pastSlots" :slot="s" :key="s._id" :is-past="true" />
+      <div v-if="bookings.upcoming.length" class="mb-10 text-center text-xs text-gray-400">
+        Times shown in your local time. Appointments are in
+        {{ bookings.upcoming[0].timeZone }}.
+      </div>
+
+      <div v-if="bookings.past.length" class="list-label">Past Appointments</div>
+      <BookingCard v-for="b of bookings.past" :booking="b" :key="b.id" :is-past="true" />
+
+      <Alert v-if="cancelError" class="my-6" type="ERROR" title="Oops">{{ cancelError }}</Alert>
     </div>
   </div>
-  <ModalAlert v-model:open="showingDeleteAlert" title="Are You Sure?" primary-button-text="Delete Event"
-    secondary-button-text="Cancel" :working="requestStatus === 'IN_PROGRESS'" @submit="deleteConfirmed">
+
+  <ModalAlert v-model:open="showingCancelAlert" title="Are You Sure?" primary-button-text="Cancel Appointment"
+    secondary-button-text="Keep It" :working="requestStatus === 'IN_PROGRESS'" @submit="cancelConfirmed">
     <template v-slot:icon>
       <ExclamationTriangleIcon class="h-7 text-red-600" />
     </template>
-    You are about to delete your appointment for {{ events.event.type }} ({{ events.event.name }}) on
-    <span class="font-bold">
-      {{ selectedSlotMonth }} {{ selectedSlot?.date }}, {{ selectedSlot?.year }}
-    </span>
-    at
-    <span class="font-bold">{{ selectedSlot?.timeStr }}</span>
-    ({{ selectedSlot?.durationMins }} minutes).
+    You are about to cancel your appointment for
+    <span class="font-bold">{{ selected?.scheduleType }}</span> on
+    <span class="font-bold">{{ selected?.dayStr }}</span> at
+    <span class="font-bold">{{ selected?.timeStr }}</span>
+    ({{ selected?.durationMins }} minutes).
   </ModalAlert>
-  <ModalAlert v-model:open="showCalendarEventAlert" title="Apple or Google Calendar"
-    primary-button-text="Yes, Add To Calendar" secondary-button-text="Cancel" :working="requestStatus === 'IN_PROGRESS'"
-    @submit="createCalenderEvent" :color="'sky'">
+
+  <ModalAlert v-model:open="showingCalendarAlert" title="Apple or Google Calendar"
+    primary-button-text="Yes, Add To Calendar" secondary-button-text="Cancel"
+    :working="requestStatus === 'IN_PROGRESS'" @submit="downloadCalendarEvent" :color="'sky'">
     <template v-slot:icon>
       <CalendarDaysIcon class="h-7 text-sky-600" />
     </template>
-    Would you like to add {{ events.event.type }} on
-    <span class="font-bold">
-      {{ selectedSlotMonth }} {{ selectedSlot?.date }}, {{ selectedSlot?.year }}
-    </span>
-    at
-    <span class="font-bold">{{ selectedSlot?.timeStr }}</span>
-    ({{ selectedSlot?.durationMins }} minutes) to your Google or Apple Calendar?
+    Would you like to add {{ selected?.scheduleType }} on
+    <span class="font-bold">{{ selected?.dayStr }}</span> at
+    <span class="font-bold">{{ selected?.timeStr }}</span>
+    ({{ selected?.durationMins }} minutes) to your Google or Apple Calendar?
   </ModalAlert>
 </template>
 
@@ -73,91 +92,115 @@
 import { computed, ref, watch } from 'vue';
 import ContactForm from '../components/ContactForm.vue';
 import Button from '../components/Button.vue';
-import MySlot from '../components/MySlot.vue';
-import { useSession } from '../store/session';
-import { FormattedSlot, MonthNames, useSlots } from '../store/slots';
-import { Slot } from '../../common/slot';
+import BookingCard from '../components/BookingCard.vue';
 import ModalAlert from '../components/ModalAlert.vue';
-import { useEvent } from '../store/event';
-import { useAPI } from '../store/fetch';
 import Alert from '../components/Alert.vue';
+import { useSession } from '../store/session';
+import { useSchedule } from '../store/schedule';
+import { FormattedBooking, useBookings } from '../store/bookings';
+import { useAPI } from '../store/fetch';
 import { ArrowUpIcon, ExclamationTriangleIcon, CalendarDaysIcon } from '@heroicons/vue/20/solid'
 
 type RequestStatus = 'NA' | 'SUCCESS' | 'ERROR' | 'IN_PROGRESS';
 
 const session = useSession();
-const events = useEvent();
-const slots = useSlots();
+const schedule = useSchedule();
+const bookings = useBookings();
+
 const phone = ref('');
-const canSubmit = computed(() => /\(\d{3}\)\s+\d{3}-\d{4}/gi.test(phone.value));
+const canSubmit = computed(() => /\(\d{3}\)\s+\d{3}-\d{4}/.test(phone.value));
 const requestStatus = ref<RequestStatus>('NA');
 const otpRequestStatus = ref<RequestStatus>('NA');
+const cancelError = ref('');
 
-const pastSlots = computed(() => slots.mySlots.filter(s => isInThePast(s)));
-const futureSlots = computed(() => slots.mySlots.filter(s => !isInThePast(s)));
-const selectedSlot = ref<null | FormattedSlot>(null);
-const showingDeleteAlert = ref(false);
-const showCalendarEventAlert = ref(false);
-const selectedSlotMonth = computed(() => selectedSlot.value ? MonthNames[selectedSlot.value.month] : '')
+const selected = ref<FormattedBooking | null>(null);
+const showingCancelAlert = ref(false);
+const showingCalendarAlert = ref(false);
+
+const bookingQuery = computed(() =>
+  schedule.scheduleId ? { scheduleId: schedule.scheduleId } : {},
+);
 
 if (session.person?._id) {
-  slots.fetchMySlots();
+  bookings.fetchBookings();
 }
 
-function slotClicked(slot: FormattedSlot) {
-  selectedSlot.value = slot;
-  showCalendarEventAlert.value = true;
-  showingDeleteAlert.value = false;
+function offerCalendarEvent(booking: FormattedBooking) {
+  selected.value = booking;
+  showingCalendarAlert.value = true;
+  showingCancelAlert.value = false;
 }
 
-function deleteSlot(slot: FormattedSlot) {
-  selectedSlot.value = slot;
-  showingDeleteAlert.value = true;
-  showCalendarEventAlert.value = false;
+function confirmCancel(booking: FormattedBooking) {
+  selected.value = booking;
+  showingCancelAlert.value = true;
+  showingCalendarAlert.value = false;
 }
 
-function deleteConfirmed() {
-  if (!selectedSlot.value || !showingDeleteAlert.value) {
+function cancelConfirmed() {
+  if (!selected.value || !showingCancelAlert.value) {
     return;
   }
+  cancelError.value = '';
   requestStatus.value = 'IN_PROGRESS';
-  const { done } = slots.deletePersonFromSlot(selectedSlot.value._id, session.person._id);
+
+  const { done, error } = bookings.cancel(selected.value);
   watch(() => done.value, (isDone) => {
     if (isDone) {
       requestStatus.value = 'SUCCESS';
-      showingDeleteAlert.value = false;
+      showingCancelAlert.value = false;
     }
-  })
+  });
+  watch(() => error.value, (message) => {
+    if (message) {
+      cancelError.value = message;
+      requestStatus.value = 'ERROR';
+      showingCancelAlert.value = false;
+    }
+  });
 }
 
-function createCalenderEvent() {
-  const { data } = useAPI('/Slots/' + selectedSlot.value?._id + '/CalendarEvent').blob();
-  watch(() => data.value, res => {
+function downloadCalendarEvent() {
+  const booking = selected.value;
+  if (!booking) {
+    return;
+  }
+  // The .ics endpoint is OTP-authenticated, so this needs the session header
+  // rather than being a plain link.
+  const { data } = useAPI(
+    `/Bookings/${booking.id}/CalendarEvent?scheduleId=${encodeURIComponent(booking.scheduleId)}`,
+    { beforeFetch: session.beforeFetch },
+  ).get().blob();
+
+  watch(() => data.value, (file) => {
+    if (!file) {
+      return;
+    }
     const link = document.createElement('a');
-    link.href = window.URL.createObjectURL(res as Blob);
-    link.setAttribute('download', events.event.type.replace(/\s/gi, '-') + '.ics');
+    link.href = window.URL.createObjectURL(file as Blob);
+    link.setAttribute('download', booking.scheduleType.replace(/\s+/g, '-') + '.ics');
     document.body.appendChild(link);
     link.click();
-    showCalendarEventAlert.value = false;
-  })
+    link.remove();
+    showingCalendarAlert.value = false;
+  });
 }
 
-function findMyEvents() {
-  if (!events.event._id || otpRequestStatus.value === 'IN_PROGRESS') {
+function findMyBookings() {
+  if (!schedule.scheduleId || otpRequestStatus.value === 'IN_PROGRESS') {
     return;
   }
   otpRequestStatus.value = 'IN_PROGRESS';
-  const { data, error } = useAPI(`/Events/${events.event._id}/CreateOTP`).post({ phone: phone.value })
+
+  const { data, error } = useAPI(
+    `/Schedules/${schedule.scheduleId}/CreateOTP`,
+  ).post({ phone: phone.value });
+
+  // The API answers the same whether or not the number is known, so this
+  // never reveals who is a customer.
   watch(() => data.value, () => otpRequestStatus.value = 'SUCCESS');
   watch(() => error.value, () => otpRequestStatus.value = 'ERROR');
 }
-
-function isInThePast(slot: Slot) {
-  const endsAt = new Date(slot.startAt);
-  endsAt.setMinutes(endsAt.getMinutes() + (slot.durationMins || 0));
-  return endsAt < new Date()
-}
-
 </script>
 
 <style>

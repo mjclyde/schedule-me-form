@@ -19,27 +19,35 @@ router.beforeEach(async (to, from, next) => {
   if (to.name === "otp") {
     const otp = to.params.otp?.toString() || "";
     localStorage.setItem("otp", otp);
-    const res = await axios.get(import.meta.env.VITE_API_HOST + "/Event", {
+    // The deep link carries nothing but the code, so ask which schedule the
+    // OTP was minted for. My Bookings still works without one — it is scoped
+    // to the person — so a lookup failure lands there rather than erroring.
+    const scheduleId = await resolveScheduleId(otp);
+    return next({
+      name: "my-events",
+      query: scheduleId ? { scheduleId } : {},
+    });
+  }
+  // Carry the current schedule across navigation so the nav links work
+  // without re-stating it.
+  if (from.query.scheduleId && !to.query.scheduleId) {
+    return next({
+      ...to,
+      query: { ...to.query, scheduleId: from.query.scheduleId },
+    });
+  }
+  next();
+});
+
+async function resolveScheduleId(otp: string) {
+  try {
+    const res = await axios.get(import.meta.env.VITE_API_HOST + "/Schedule", {
       headers: { Authorization: otp },
     });
-    next({ name: "my-events", query: { eventId: res.data._id } });
+    return res.data?._id as string | undefined;
+  } catch {
+    return undefined;
   }
-  // Carry the current schedule/event across navigation so the nav links work
-  // without re-stating it. `eventId` still belongs to the old slot-based
-  // My Events page, which moves to bookings in the next phase.
-  const carried: Record<string, any> = { ...to.query };
-  let changed = false;
-  for (const key of ["scheduleId", "eventId"]) {
-    if (from.query[key] && !to.query[key]) {
-      carried[key] = from.query[key];
-      changed = true;
-    }
-  }
-  if (changed) {
-    next({ ...to, query: carried });
-  } else {
-    next();
-  }
-});
+}
 
 export default router;
