@@ -9,6 +9,12 @@ export interface GoogleTokens {
   expiryDate: Date;
 }
 
+/** What the OTP grants access to. Exactly one is set in practice. */
+export interface OTPScope {
+  scheduleId?: string;
+  eventId?: string;
+}
+
 export interface UpdateFields {
   name?: string;
   optOutSMS?: boolean;
@@ -66,7 +72,14 @@ export class PersonService extends BaseService<PersonModel> {
     return this.collection.insertOne(doc).then(() => doc);
   }
 
-  async createOTP(phone: string, eventId: string) {
+  /**
+   * Mints an OTP for an existing person.
+   *
+   * @returns the updated person, or null when no person holds that phone —
+   *   persons are only ever created by booking, so an unknown number is a
+   *   normal outcome here, not an error.
+   */
+  async createOTP(phone: string, scope: OTPScope) {
     let otp: string | undefined = undefined;
     do {
       otp = this.otps.rnd();
@@ -77,10 +90,11 @@ export class PersonService extends BaseService<PersonModel> {
     } while (!otp);
     const expiresAt = new Date();
     expiresAt.setMonth(expiresAt.getMonth() + 1);
-    return this.collection.findOneAndUpdate(
+    const doc = await this.collection.findOneAndUpdate(
       { phone },
-      { $set: { otp: { value: otp, expiresAt, eventId } } },
+      { $set: { otp: { value: otp, expiresAt, ...scope } } },
       { returnDocument: "after" },
     );
+    return doc ? new Person(doc) : null;
   }
 }

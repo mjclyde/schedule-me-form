@@ -47,7 +47,7 @@ export class SlotAPI {
     res.send(
       await this.slots.findSlotsByPerson(
         req.person._id,
-        req.person.otp.eventId,
+        req.person.otp.eventId || "",
       ),
     );
   }
@@ -364,7 +364,7 @@ export class SlotAPI {
     ) {
       return person.otp;
     }
-    const doc = await this.persons.createOTP(person.phone, event._id);
+    const doc = await this.persons.createOTP(person.phone, { eventId: event._id });
     return doc?.otp;
   }
 }

@@ -3,10 +3,14 @@ import { Request, Response } from "express";
 import { DateTime } from "luxon";
 import { ScheduleService } from "../services/schedule.service";
 import { PersonService } from "../services/person.service";
+import { NotificationService } from "../services/notification.service";
 import { AvailabilityService } from "../services/availability.service";
 import { TimeRange } from "../google/availability";
 import { Schedule } from "../models/schedule";
 import { AvailabilityResponse, AvailableSlot } from "../../common/schedule";
+import { AuthorizedRequest, UseOTPAuth } from "../middleware/otpAuthorization";
+import { FormatPhoneNumber } from "../utils/formatPhoneNumber";
+import { CreateOTPLink } from "../utils/otpLink";
 import { BadRequestError } from "../errors";
 
 /**
@@ -17,13 +21,68 @@ const MAX_RANGE_DAYS = 62;
 
 export class SchedulesAPI {
   private schedules: ScheduleService;
+  private persons: PersonService;
+  private notifications: NotificationService;
   private availability: AvailabilityService;
 
   constructor(injector: Injector) {
     this.schedules = injector.find(ScheduleService);
-    this.availability = AvailabilityService.GetInstance(
-      injector.find(PersonService),
-    );
+    this.persons = injector.find(PersonService);
+    this.notifications = injector.find(NotificationService);
+    this.availability = AvailabilityService.GetInstance(this.persons);
+  }
+
+  /**
+   * The schedule the caller's OTP was minted for.
+   *
+   * An OTP deep link lands with nothing in the URL but the code, so this is
+   * how the My Bookings page recovers which schedule it is looking at.
+   */
+  @API("get", "/Schedule", UseOTPAuth())
+  async findByOtp(req: AuthorizedRequest, res: Response) {
+    const scheduleId = req.person.otp.scheduleId;
+    const schedule = scheduleId
+      ? await this.schedules.findById(scheduleId)
+      : null;
+    if (!schedule) {
+      return res.sendStatus(404);
+    }
+    res.send(schedule.toPublic(DateTime.now().setZone(schedule.timeZone)));
+  }
+
+  /**
+   * Texts a manage link to someone who has booked this schedule before.
+   *
+   * Answers 204 whether or not the number belongs to anyone. Persons are only
+   * ever created by booking, so an unknown number is ordinary — and saying so
+   * would turn this into an oracle for which numbers are customers. The old
+   * slot-era endpoint returned 500 here instead (bug #10).
+   */
+  @API("post", "/Schedules/:id/CreateOTP")
+  async createOTP(req: Request<{ id: string }>, res: Response) {
+    if (!req.body?.phone) {
+      return res.status(400).send("`phone` is required");
+    }
+    const schedule = await this.schedules.findById(req.params.id);
+    if (!schedule) {
+      return res.sendStatus(404);
+    }
+
+    const phone = FormatPhoneNumber(req.body.phone);
+    const person = await this.persons.createOTP(phone, {
+      scheduleId: schedule._id,
+    });
+    if (person?.otp?.value) {
+      await this.notifications.send({
+        personId: person._id,
+        name: person.name,
+        phone,
+        message:
+          `Hi ${person.name}, use this link to view your ` +
+          `${schedule.type} appointments: ${CreateOTPLink(person.otp.value)}`,
+      });
+    }
+    res.sendStatus(204);
   }
 
   @API("get", "/Schedules/:id")

@@ -24,11 +24,18 @@ export function formatAppointment(startAt: DateTime, timeZone: string) {
   };
 }
 
-export function bookingConfirmation(info: BookingMessageInfo) {
+export function bookingConfirmation(
+  info: BookingMessageInfo & { manageUrl?: string },
+) {
   const { date, time } = formatAppointment(info.startAt, info.timeZone);
   return (
     `Hello ${info.personName}! You are scheduled for ${info.scheduleType} on ` +
-    `${date} at ${time}. We look forward to seeing you there.`
+    `${date} at ${time}. We look forward to seeing you there.` +
+    // Omitted rather than broken when no OTP could be minted: a link is
+    // better than none, but none is better than one that goes nowhere.
+    (info.manageUrl
+      ? ` To view or cancel your appointment, click here: ${info.manageUrl}`
+      : "")
   );
 }
 

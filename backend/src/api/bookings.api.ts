@@ -25,6 +25,7 @@ import {
   ownerBookingNotice,
   ownerCancellationNotice,
 } from "../utils/bookingMessages";
+import { CreateOTPLink } from "../utils/otpLink";
 import { BadRequestError } from "../errors";
 
 /** A loose check: the authority on deliverability is Google's own invite. */
@@ -222,6 +223,32 @@ export class BookingsAPI {
     }
   }
 
+  /**
+   * An OTP deep link to the caller's bookings, or undefined if one cannot be
+   * minted — the booking still stands, so a missing link is not a failure.
+   *
+   * Reuses a live OTP already scoped to this schedule rather than rotating it,
+   * so an earlier confirmation's link keeps working.
+   */
+  private async manageLink(person: Person, schedule: Schedule) {
+    try {
+      if (
+        person.otp?.value &&
+        person.otp.scheduleId === schedule._id &&
+        person.isValidOtp(person.otp.value)
+      ) {
+        return CreateOTPLink(person.otp.value);
+      }
+      const updated = await this.persons.createOTP(person.phone, {
+        scheduleId: schedule._id,
+      });
+      return updated?.otp?.value ? CreateOTPLink(updated.otp.value) : undefined;
+    } catch (err) {
+      console.error(`Could not mint a manage link: ${err}`);
+      return undefined;
+    }
+  }
+
   private async notifyCancelled(
     schedule: Schedule,
     person: Person,
@@ -343,7 +370,10 @@ export class BookingsAPI {
         name: person.name,
         phone: person.phone,
         optOutSMS: person.optOutSMS,
-        message: bookingConfirmation(info),
+        message: bookingConfirmation({
+          ...info,
+          manageUrl: await this.manageLink(person, schedule),
+        }),
       })
       .catch((err) => console.error(`Failed to send confirmation SMS: ${err}`));
 

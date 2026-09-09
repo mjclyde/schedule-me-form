@@ -40,7 +40,7 @@ async function main() {
     console.log(`Created person for ${phone}`);
   }
 
-  const updated = await persons.createOTP(phone, scheduleId || "");
+  const updated = await persons.createOTP(phone, { scheduleId });
   const otp = updated?.otp?.value;
   if (!otp) {
     throw new Error("Failed to mint an OTP");

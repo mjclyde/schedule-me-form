@@ -41,6 +41,8 @@ interface FakeCalendarOptions {
   existing?: any[];
   /** Extra events that appear only in the post-insert conflict read. */
   raceWinner?: any;
+  /** Simulates minting the manage-link OTP failing. */
+  otpFails?: boolean;
 }
 
 function buildApi(
@@ -85,6 +87,10 @@ function buildApi(
     findByPhone: async () => null,
     create: async (p: any) => ({ _id: "person1", ...p }),
     update: async () => {},
+    createOTP: async () =>
+      options.otpFails
+        ? null
+        : { _id: "person1", name: "Jane Doe", otp: { value: "abc123" } },
   };
 
   const api = new BookingsAPI({ find: () => ({}) } as any);
@@ -229,6 +235,27 @@ describe("POST /Schedules/:id/Bookings", () => {
     assert.lengthOf(calls.sms, 2);
     assert.include(calls.sms[0].message, "You are scheduled for Tune-Up");
     assert.include(calls.sms[1].message, "Jane Doe has signed up");
+  });
+
+  it("gives the booker an OTP link to manage the appointment", async () => {
+    const { api, calls } = buildApi(makeSchedule(), { existing });
+
+    await api.create(req("2026spring", validBody), fakeRes() as any);
+
+    assert.include(calls.sms[0].message, "abc123");
+  });
+
+  it("still confirms the booking when the manage link cannot be minted", async () => {
+    // The appointment is already on the calendar; a missing link must not
+    // cost the booker their confirmation.
+    const { api, calls } = buildApi(makeSchedule(), { existing, otpFails: true });
+    const res = fakeRes();
+
+    await api.create(req("2026spring", validBody), res as any);
+
+    assert.equal(res.code, 200);
+    assert.include(calls.sms[0].message, "You are scheduled for Tune-Up");
+    assert.notInclude(calls.sms[0].message, "undefined");
   });
 
   it("refuses a time the calendar does not offer", async () => {

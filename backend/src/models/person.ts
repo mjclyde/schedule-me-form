@@ -8,7 +8,10 @@ export interface PersonModel extends BaseModel {
   otp?: {
     value: string;
     expiresAt: Date;
-    eventId: string;
+    /** Set by the calendar-backed flow. */
+    scheduleId?: string;
+    /** Slot-era scope, kept until Phase 5 removes the old My Events page. */
+    eventId?: string;
   };
   googleTokens?: {
     accessToken: string;
@@ -24,7 +27,12 @@ export class Person extends BaseDoc<PersonModel> implements PersonModel {
   @hy("string") name: string;
   @hy("string") phone: string;
   @hy("bool") optOutSMS?: boolean;
-  @hy("object") otp?: { value: string; expiresAt: Date; eventId: string };
+  @hy("object") otp?: {
+    value: string;
+    expiresAt: Date;
+    scheduleId?: string;
+    eventId?: string;
+  };
   @hy("object") googleTokens?: {
     accessToken: string;
     refreshToken: string;

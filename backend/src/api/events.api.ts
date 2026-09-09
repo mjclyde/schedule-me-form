@@ -21,7 +21,7 @@ export class EventAPI {
 
   @API('get', '/Event', UseOTPAuth())
   async findByOtp(req: AuthorizedRequest, res: Response) {
-    res.send(await this.events.findById(req.person.otp.eventId));
+    res.send(await this.events.findById(req.person.otp.eventId || ""));
   }
 
   @API('get', '/Events')
@@ -50,16 +50,18 @@ export class EventAPI {
       return res.sendStatus(400);
     }
     const phone = FormatPhoneNumber(req.body.phone);
-    const doc = await this.persons.createOTP(phone, req.params.id);
-    if (!doc?._id || !doc.otp?.value) {
-      return res.sendStatus(500);
+    // A phone that has never signed up is ordinary, not an error: persons are
+    // only ever created by booking. This used to 500 (bug #10). Answering the
+    // same either way also keeps the form from confirming who is a customer.
+    const doc = await this.persons.createOTP(phone, { eventId: req.params.id });
+    if (doc?.otp?.value) {
+      this.notifications.send({
+        personId: doc._id,
+        name: doc.name,
+        phone,
+        message: `Hi ${doc.name}, use this link to view your scheduled events: ${CreateOTPLink(doc.otp.value)}`,
+      })
     }
-    this.notifications.send({
-      personId: doc._id,
-      name: doc.name,
-      phone,
-      message: `Hi ${doc.name}, use this link to view your scheduled events: ${CreateOTPLink(doc.otp.value)}`,
-    })
     res.sendStatus(204);
   }
 
