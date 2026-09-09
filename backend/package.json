@@ -10,7 +10,8 @@
     "test:watch": "nyc mocha -w --colors",
     "schedule": "ts-node src/scripts/upsertSchedule.ts",
     "owner": "ts-node src/scripts/createOwner.ts",
-    "reminders": "ts-node src/scripts/runReminders.ts"
+    "reminders": "ts-node src/scripts/runReminders.ts",
+    "drop-slot-data": "ts-node src/scripts/dropSlotData.ts"
   },
   "author": "",
   "license": "ISC",
