@@ -9,7 +9,8 @@
     "test": "nyc mocha --colors",
     "test:watch": "nyc mocha -w --colors",
     "schedule": "ts-node src/scripts/upsertSchedule.ts",
-    "owner": "ts-node src/scripts/createOwner.ts"
+    "owner": "ts-node src/scripts/createOwner.ts",
+    "reminders": "ts-node src/scripts/runReminders.ts"
   },
   "author": "",
   "license": "ISC",

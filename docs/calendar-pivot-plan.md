@@ -1,6 +1,6 @@
 # Architecture Pivot: Google Calendar as the Source of Truth
 
-Status: **Phases 1–3 complete**; Phases 4–5 not yet started
+Status: **Phases 1–4 complete**; Phase 5 not yet started
 Branch: `claude/google-calendar-integration-arch-sefqo2`
 
 ## Goal
@@ -291,10 +291,32 @@ state and needs different copy.
 | `GET` | `/Schedules/:id` | public | Config for the booking page (duration, tz, description) + the resolved `bookableRange` and open/closed state |
 | `GET` | `/Schedules/:id/Availability?from=&to=` | public | `{ timeZone, state, slots: [{ startAt, endAt }] }`. Slots are **ephemeral** — no ids. Range clamped to `bookableRange`. |
 | `POST` | `/Schedules/:id/Bookings` | public | `{ startAt, name, phone, email?, remindMe? }` → `{ bookingId, startAt, endAt }`; `409` on race, `422` if outside `bookableRange` |
-| `GET` | `/MyBookings` | OTP | Derived from the calendar |
-| `DELETE` | `/Bookings/:id` | OTP | Ownership checked via `extendedProperties.private.personId` |
-| `GET` | `/Bookings/:id/CalendarEvent` | public | `.ics` fallback, generated in memory |
+| `GET` | `/MyBookings` | OTP | Derived from the calendar, across every schedule the person has booked |
+| `DELETE` | `/Bookings/:id?scheduleId=` | OTP | Ownership checked via `extendedProperties.private.personId` |
+| `GET` | `/Bookings/:id/CalendarEvent?scheduleId=` | OTP | `.ics` fallback, generated in memory |
+| `GET` | `/Schedule` | OTP | The schedule the caller's OTP was minted for |
 | `POST` | `/Schedules/:id/CreateOTP` | public | Rename of `/Events/:id/CreateOTP` |
+
+**Why the endpoints take a `scheduleId`.** A Google event id does not name the
+calendar holding it, and neither does a person id — so both `/MyBookings` and
+the two `/Bookings/:id` routes resolve the calendar through a schedule.
+`/MyBookings` collapses every schedule onto the distinct
+`(ownerPersonId, calendarId)` pairs behind them — normally one — and queries
+each once. Querying per schedule would both cost more and return a booking once
+per schedule sharing its calendar. It is scoped to the **person**, not to the
+OTP's schedule, so an OTP minted while booking one schedule does not hide a
+booking on another.
+
+The two `/Bookings/:id` routes answer a single `404` for "no such event", "not
+a booking of ours" and "not yours". Distinguishing them would let any OTP
+holder probe the owner's calendar for which event ids exist. An untagged event
+always fails the ownership check, so neither route can ever touch something the
+app did not create.
+
+`/Bookings/:id/CalendarEvent` is behind OTP auth rather than public as first
+specced: it is only ever reached from the authenticated My Bookings page, so
+requiring the header costs nothing and stops a guessed event id from returning
+an appointment's title and time.
 
 ### Unchanged
 
@@ -363,23 +385,31 @@ Items 1–3, 7 and 9 are **fixed** in Phase 1.
 4. **`slot.service.ts findAvailable`** — `{ $lt: [{ $size: "$persons" }, "$capacity.max"] }`
    evaluates false when `capacity.max` is absent, so any slot without an explicit max is
    never bookable. Moot after the pivot, but it explains any "slot never appeared" reports.
-5. **`app.ts` hardcodes `2025tdfa` / `2025tdnl4`** in the reminder cron. Should iterate
-   active schedules — and with §5.1 it can cheaply skip schedules whose window is over.
-   Note the cutoff is `endDate + 1 day`, not `endDate`: appointments happen *on* the last
-   bookable day, so their reminders are still due after it.
-6. **`slots.api.ts` `.ics` handling** writes the file into the process CWD and unlinks after
-   download — racy and leaks on failed downloads. Build the string in memory and `res.send`.
+5. ~~**`app.ts` hardcodes `2025tdfa` / `2025tdnl4`** in the reminder cron.~~ Fixed in
+   Phase 4: the sweep walks active schedules and skips any whose window has closed, so a
+   finished campaign costs no Google call. The cutoff is `endDate + 1 day`, not `endDate` —
+   appointments happen *on* the last bookable day, so their reminders are still due during
+   it. Schedules that have not opened yet are swept too: an appointment at 09:00 on the
+   opening day needs its reminder the day before.
+6. ~~**`slots.api.ts` `.ics` handling** writes the file into the process CWD and unlinks
+   after download — racy and leaks on failed downloads.~~ The replacement,
+   `GET /Bookings/:id/CalendarEvent`, builds the string in memory and `res.send`s it. The
+   slot-era route itself dies with the slot code in Phase 5.
 7. ~~**`backend/test/index.spec.ts` imports `Thing` from `../src/index`, which does not exist**~~ —
    the suite could not compile, so `npm test` was dead. Removed; real specs took its place.
-8. Hardcoded `America/Denver` in `utils/formatTime.ts`, `reminders.ts`, and `slots.api.ts`
-   message builders. Replace with the schedule's `timeZone`.
-10. **`PersonService.createOTP` does not upsert**, and persons are only ever created by
-   booking. So `POST /Events/:id/CreateOTP` returns 500 for a phone number that has never
-   signed up (the "Find My Events" form's likely failure mode), and — worse — the OTP flow
-   cannot bootstrap itself at all: linking a calendar needs an OTP, an OTP needs a person,
-   and a person needs a booking, which needs a linked calendar. Worked around by
-   `npm run owner` (see docs/testing-the-pivot.md); the 500 is in the old slot path that
-   Phase 4 replaces.
+8. Hardcoded `America/Denver` in `utils/formatTime.ts`, ~~`reminders.ts`~~, and
+   `slots.api.ts` message builders. `reminders.ts` was rewritten in Phase 4 and now formats
+   in the schedule's own `timeZone`. The remaining two are in the slot path and die with it
+   in Phase 5.
+10. ~~**`PersonService.createOTP` does not upsert**, and persons are only ever created by
+   booking, so `POST /Events/:id/CreateOTP` returned 500 for a phone number that had never
+   signed up (the "Find My Events" form's likely failure mode).~~ Fixed in Phase 4:
+   `createOTP` now returns `null` for an unknown phone, and both CreateOTP endpoints answer
+   `204` either way, sending nothing. An unknown number is an ordinary outcome, not an
+   error — and distinguishing it would turn the form into an oracle for which numbers are
+   customers. The bootstrap chicken-and-egg (linking a calendar needs an OTP, an OTP needs a
+   person, a person needs a booking, a booking needs a linked calendar) is still worked
+   around by `npm run owner`; see docs/testing-the-pivot.md.
 9. ~~**`GoogleCalendar.listEvents` paginated in an infinite loop.**~~ It tracked
    `nextPageToken` but never fed it back into the request, so any range holding more events
    than Google's page size (250 by default) re-fetched page one forever — hanging the request
@@ -469,21 +499,39 @@ curl "$API/Schedules/2026spring/Availability?from=2026-03-01&to=2026-03-31"
 
 **The booking page is now `/?scheduleId=<slug>`**, not `?eventId=`.
 
-**Known gap until Phase 4:** `/my-events` still reads the old Mongo slots, so a booking made
-through the new page will not appear there. The confirmation SMS therefore deliberately does
-**not** include a manage link yet — sending people to a page that cannot show their booking
-would be worse than omitting it. Cancelling a new booking currently means editing the
-calendar directly.
+**Phase 4 — Lifecycle** ✅ *done*
+- `GET /MyBookings` and `DELETE /Bookings/:id`, plus `GET /Bookings/:id/CalendarEvent`
+  (the `.ics` fallback) and `GET /Schedule`. See §6 for why they take a `scheduleId`.
+- The OTP manage link is back in the confirmation SMS. An OTP now scopes to a
+  `scheduleId` rather than an `eventId`; both fields live on the sub-document until
+  Phase 5 removes the slot-era pages that read `eventId`.
+- Reminder cron rewritten off the calendar: it lists each schedule's own bookings in the
+  next 24 hours, skips the ones already stamped, texts the rest, and patches
+  `reminderSentAt` onto the event. `findRemindersDue` / `reminderHasBeenSent` deleted.
+- `MyEvents.vue` moved onto bookings, with `store/bookings.ts` and `BookingCard.vue`.
+  `MainHeader.vue` moved off `store/event.ts` — it had been rendering blank since the
+  Phase 3 cutover, because it read a store populated from `?eventId=`.
+- Bugs 5, 6 and 10 fixed; 8 fixed for `reminders.ts`.
+- 159 tests.
 
-**Phase 4 — Lifecycle**
-- `GET /MyBookings`, `DELETE /Bookings/:id`, and the OTP manage link restored to the
-  confirmation SMS.
-- `MyEvents.vue` moves off `store/slots.ts` / `store/event.ts` onto bookings.
-- Reminder cron reads the calendar and patches `reminderSentAt`; delete `findRemindersDue`.
+**Two things worth knowing about the reminder patch.** Google merges
+`extendedProperties.private` key by key, so the sweep patches *only*
+`reminderSentAt`; sending the whole map would drop `app` / `scheduleId` /
+`personId` and orphan the booking from every query the app makes. There is a test
+pinning that. And a failed SMS deliberately leaves the booking unstamped so the next
+sweep retries — self-limiting, because the booking leaves the 24-hour window once it
+passes. A booking whose person has been deleted *is* stamped, since that will not fix
+itself and would otherwise be retried every hour.
 
 **Phase 5 — Teardown**
-- Delete `Slot` model/service/API and `common/slot.ts`.
+- Delete `Slot` model/service/API and `common/slot.ts`, plus `EventService` / `EventAPI`
+  and `common/event.ts`.
+- Frontend: `store/slots.ts`, `store/event.ts` and `MySlot.vue` now reference only each
+  other and have no live consumer — delete them.
+- Drop `otp.eventId` from the person sub-document once nothing reads it.
 - Drop the `slots` and `events` collections.
+- Remaining hardcoded `America/Denver` in `utils/formatTime.ts` and `slots.api.ts`
+  goes with the slot code (bug #8).
 - README/setup notes: how to mark a window Free, how to link the calendar.
 
 ---

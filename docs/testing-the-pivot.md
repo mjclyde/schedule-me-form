@@ -1,8 +1,8 @@
 # Testing the calendar pivot locally
 
 A walkthrough for booking a real appointment against a real Google calendar,
-end to end. Everything here is Phases 1–3; see `calendar-pivot-plan.md` for
-what is still missing.
+end to end, and then managing it. Everything here is Phases 1–4; see
+`calendar-pivot-plan.md` for what is still missing.
 
 ## 0. Prerequisites
 
@@ -144,13 +144,67 @@ curl -X POST "$API/Schedules/testrun/Bookings" \
 Responses worth provoking: `409` for a slot that is gone or already taken,
 `422` for a time outside the schedule's date window.
 
+**Book once with an email address.** The attendee-invite path
+(`sendUpdates: "all"`) only runs when one is supplied, so a phone-only test
+never exercises it. You should get a real Google Calendar invite.
+
+## 7. Manage the booking
+
+The confirmation SMS now carries a manage link (`/otp/<code>`). Open it, or go
+to `http://localhost:5173/my-events?scheduleId=testrun` and enter the phone
+number you booked with.
+
+Over the API, with the OTP from the SMS:
+
+```sh
+curl -H "Authorization: <otp>" $API/MyBookings
+# -> [{ id, scheduleId, scheduleName, scheduleType, startAt, endAt, timeZone, durationMins }]
+
+curl -H "Authorization: <otp>" "$API/Bookings/<id>/CalendarEvent?scheduleId=testrun"
+# -> an .ics body
+
+curl -X DELETE -H "Authorization: <otp>" "$API/Bookings/<id>?scheduleId=testrun"
+# -> 204, the calendar event is gone, and the slot is offered again
+```
+
+`scheduleId` is required on the two `/Bookings/:id` routes: a Google event id
+does not name the calendar holding it. `/MyBookings` needs no id — it is scoped
+to the person and covers every schedule they have booked.
+
+Worth provoking: a `404` from `DELETE` using someone else's booking id, or an
+event id you copied off the owner's calendar that the app did not create.
+Both answer the same `404` on purpose.
+
+## 8. Reminders
+
+The cron only starts when `ENV=PROD`, so run one sweep by hand rather than
+waiting on `0 12-18 * * *`. Book something inside the next 24 hours first:
+
+```sh
+npm run reminders
+```
+
+This sends **real** text messages to anyone with an appointment in the next 24
+hours who has not already been reminded. With no Twilio credentials configured
+the send fails, the sweep logs and skips it, and the booking stays unstamped
+for a later retry.
+
+After a successful sweep the calendar event gains a `reminderSentAt` in its
+private extended properties, and a second sweep is a no-op — that stamp is the
+only record that the reminder went out. Check it with:
+
+```sh
+curl -H "Authorization: <otp>" $API/MyBookings   # still listed, unchanged
+```
+
+or by opening the event in Google Calendar (the stamp is not shown in the UI;
+`events.get` is the way to see it).
+
 ## Known gaps at this point
 
-- **`/my-events` still reads the old Mongo slots**, so a new booking will not
-  appear there, and the confirmation SMS deliberately omits the manage link.
-  Cancelling means deleting the event in Google Calendar. Phase 4 fixes this.
-- **Reminders still run off Mongo slots**, so new bookings get none.
 - **No admin UI.** Schedules are seeded by the CLI above.
+- **The slot-era pages and endpoints are still present** but nothing links to
+  them. Phase 5 deletes them.
 - Editing or deleting a booking directly in Google Calendar changes app state
   silently — no cancellation SMS. That is an accepted cost of the
   calendar-as-database design; see §4 of the plan.
