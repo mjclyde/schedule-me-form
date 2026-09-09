@@ -246,7 +246,9 @@ describe("GET /Schedule", () => {
   });
 
   it("404s when the OTP predates schedules", async () => {
-    // An OTP minted by the old slot flow carries an eventId, not a scheduleId.
+    // Slot-era person documents are still in Mongo with an `otp.eventId` and
+    // no scheduleId. The field is gone from the model, so it deserializes to
+    // an OTP that grants access to nothing in particular.
     const { api } = buildApi();
     const res = fakeRes();
 

@@ -4,9 +4,7 @@ import { DateTime } from "luxon";
  * SMS copy for bookings.
  *
  * Every message formats times in the *schedule's* zone rather than a hardcoded
- * one, so a schedule in another region reads correctly. (The older slot-based
- * messages in slots.api.ts still hardcode America/Denver; they go away with the
- * slot code itself.)
+ * one, so a schedule in another region reads correctly.
  */
 
 export interface BookingMessageInfo {

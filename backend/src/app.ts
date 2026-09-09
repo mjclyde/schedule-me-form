@@ -13,10 +13,6 @@ import {
   DocumentNotFoundError,
   DuplicateIdError,
 } from "./errors";
-import { EventService } from "./services/event.service";
-import { EventAPI } from "./api/events.api";
-import { SlotService } from "./services/slot.service";
-import { SlotAPI } from "./api/slots.api";
 import { PersonService } from "./services/person.service";
 import { NotificationService } from "./services/notification.service";
 import { Reminders } from "./reminders";
@@ -28,20 +24,12 @@ import { SchedulesAPI } from "./api/schedules.api";
 import { BookingsAPI } from "./api/bookings.api";
 
 const SERVICES: InjectableConstructor[] = [
-  EventService,
-  SlotService,
   PersonService,
   NotificationService,
   ScheduleService,
 ];
 
-const APIS: APIConstructor[] = [
-  EventAPI,
-  SlotAPI,
-  PersonsAPI,
-  SchedulesAPI,
-  BookingsAPI,
-];
+const APIS: APIConstructor[] = [PersonsAPI, SchedulesAPI, BookingsAPI];
 
 export class App {
   private app: Application;

@@ -9,10 +9,14 @@ export interface GoogleTokens {
   expiryDate: Date;
 }
 
-/** What the OTP grants access to. Exactly one is set in practice. */
+/**
+ * What the OTP grants access to.
+ *
+ * Optional: the owner bootstrap mints an unscoped OTP, because linking a
+ * Google calendar happens before there is a schedule to point at.
+ */
 export interface OTPScope {
   scheduleId?: string;
-  eventId?: string;
 }
 
 export interface UpdateFields {

@@ -8,10 +8,12 @@ export interface PersonModel extends BaseModel {
   otp?: {
     value: string;
     expiresAt: Date;
-    /** Set by the calendar-backed flow. */
+    /**
+     * What the OTP grants access to. Optional because slot-era documents were
+     * scoped to an `eventId` instead; those still deserialize, they just have
+     * no schedule, and every endpoint reading this treats that as "not found".
+     */
     scheduleId?: string;
-    /** Slot-era scope, kept until Phase 5 removes the old My Events page. */
-    eventId?: string;
   };
   googleTokens?: {
     accessToken: string;
@@ -31,7 +33,6 @@ export class Person extends BaseDoc<PersonModel> implements PersonModel {
     value: string;
     expiresAt: Date;
     scheduleId?: string;
-    eventId?: string;
   };
   @hy("object") googleTokens?: {
     accessToken: string;
